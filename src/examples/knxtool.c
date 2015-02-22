@@ -55,26 +55,26 @@ main (int ac, char *ag[])
   /* Open the Socket */
   con = EIBSocketURL (ag[1]);
   if (!con)
-    die ("Open failed");
+    die ("%s", "Open failed");
 
   if (strcmp (ag[0], "on") == 0)
     {
       if (ac < 3)
 	{
 	  EIBClose (con);
-	  die ("usage: %s url eibaddr", ag[0]);
+      die ("%s", "usage: %s url eibaddr", ag[0]);
 	}
       dest = readgaddr (ag[2]);
       buf[0] = 0;
       buf[1] = 0x81;
 
       if (EIBOpenT_Group (con, dest, 1) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
 
       len = EIBSendAPDU (con, 2, buf);
       if (len == -1)
-	die ("Request failed");
-      printf ("Send request\n");
+    die ("%s", "Request failed");
+      printf ("%s", "Send request\n");
     }
   else if (strcmp (ag[0], "off") == 0)
     {
@@ -92,8 +92,8 @@ main (int ac, char *ag[])
 
       len = EIBSendAPDU (con, 2, buf);
       if (len == -1)
-	die ("Request failed");
-      printf ("Send request\n");
+    die ("%s", "Request failed");
+      printf ("%s", "Send request\n");
     }
   else if (strcmp (ag[0], "write") == 0)
     {
@@ -108,12 +108,12 @@ main (int ac, char *ag[])
       buf[2] = readHex (ag[3]);
 
       if (EIBOpenT_Group (con, dest, 1) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
 
       len = EIBSendAPDU (con, 3, buf);
       if (len == -1)
-	die ("Request failed");
-      printf ("Send request\n");
+    die ("%s", "Request failed");
+      printf ("%s", "Send request\n");
     }
   else if (strcmp (ag[0], "swrite") == 0)
     {
@@ -127,12 +127,12 @@ main (int ac, char *ag[])
       buf[1] = 0x80 | (readHex (ag[3]) & 0x3f);
 
       if (EIBOpenT_Group (con, dest, 1) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
 
       len = EIBSendAPDU (con, 2, buf);
       if (len == -1)
-	die ("Request failed");
-      printf ("Send request\n");
+    die ("%s", "Request failed");
+      printf ("%s", "Send request\n");
     }
   else if (strcmp (ag[0], "read") == 0)
     {
@@ -145,26 +145,26 @@ main (int ac, char *ag[])
       dest = readgaddr (ag[2]);
 
       if (EIBOpenT_Group (con, dest, 0) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
 
       buf[0] = 0;
       buf[1] = 0;
       len = EIBSendAPDU (con, 2, buf);
       if (len == -1)
-	die ("Request failed");
+    die ("%s", "Request failed");
 
       while (1)
 	{
 	  len = EIBGetAPDU_Src (con, sizeof (buf), buf, &src);
 	  if (len == -1)
-	    die ("Read failed");
+        die ("%s", "Read failed");
 	  if (len < 2)
-	    die ("Invalid Packet");
+        die ("%s", "Invalid Packet");
 	  if (buf[0] & 0x3 || (buf[1] & 0xC0) == 0xC0)
 	    {
-	      printf ("Error: Unknown APDU: ");
+	      printf ("%s", "Error: Unknown APDU: ");
 	      printHex (len, buf);
-	      printf ("\n");
+          printf ("%s", "\n");
 	    }
 	  else if ((buf[1] & 0xC0) == 0x40)
 	    {
@@ -172,7 +172,7 @@ main (int ac, char *ag[])
 		printf ("%02X", buf[1] & 0x3F);
 	      else
 		printHex (len - 2, buf + 2);
-	      printf ("\n");
+          printf ("%s", "\n");
 	      break;
 	    }
 	}
@@ -188,20 +188,20 @@ main (int ac, char *ag[])
       dest = readgaddr (ag[2]);
 
       if (EIBOpenT_Group (con, dest, 0) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
 
       buf[0] = 0;
       buf[1] = 0;
       len = EIBSendAPDU (con, 2, buf);
       if (len == -1)
-	die ("Request failed");
+    die ("%s", "Request failed");
 
       while (1)
 	{
 	  len = EIBGetAPDU_Src (con, sizeof (buf), buf, &src);
 	  if (len < 2 || buf[0] & 0x3 || (buf[1] & 0xC0) == 0xC0)
 	    {
-	      printf ("ERR");
+	      printf ("%s", "ERR");
 	      break;
 	    }
 	  else if ((buf[1] & 0xC0) == 0x40)
@@ -209,12 +209,12 @@ main (int ac, char *ag[])
 	      if (len == 2)
 		{
 		  if (buf[1] & 0x3F)
-		    printf (ag[3]);
+            printf ("%s", ag[3]);
 		  else if (ac == 5)
-		    printf (ag[4]);
+            printf ("%s", ag[4]);
 		}
 	      else
-		printf ("ERR");
+		printf ("%s", "ERR");
 	      break;
 	    }
 	}
@@ -230,26 +230,26 @@ main (int ac, char *ag[])
       dest = readgaddr (ag[2]);
 
       if (EIBOpenT_Group (con, dest, 0) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
 
       buf[0] = 0;
       buf[1] = 0;
       len = EIBSendAPDU (con, 2, buf);
       if (len == -1)
-	die ("Request failed");
+    die ("%s", "Request failed");
 
       while (1)
 	{
 	  len = EIBGetAPDU_Src (con, sizeof (buf), buf, &src);
 	  if (len == -1)
-	    die ("Read failed");
+        die ("%s", "Read failed");
 	  if (len < 2)
-	    die ("Invalid Packet");
+        die ("%s", "Invalid Packet");
 	  if (buf[0] & 0x3 || (buf[1] & 0xC0) == 0xC0)
 	    {
-	      printf ("Error: Unknown APDU: ");
+	      printf ("%s", "Error: Unknown APDU: ");
 	      printHex (len, buf);
-	      printf ("\n");
+          printf ("%s", "\n");
 	    }
 	  else if ((buf[1] & 0xC0) == 0x40)
 	    {
@@ -272,7 +272,7 @@ main (int ac, char *ag[])
 		  else
 		    printHex (len - 2, buf + 2);
 		}
-	      printf ("\n");
+          printf ("%s", "\n");
 	      break;
 	    }
 	}
@@ -288,14 +288,14 @@ main (int ac, char *ag[])
       dest = readgaddr (ag[2]);
 
       if (EIBOpenT_Group (con, dest, 0) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
 
       buf[0] = 0;
       buf[1] = 0x80;
       int time;
       if (!sscanf (ag[3], "%d", &time))
 	{
-	  die ("Invalid param: time");
+      die ("%s", "Invalid param: time");
 	}
 
       unsigned long step = time * 8333;
@@ -310,7 +310,7 @@ main (int ac, char *ag[])
 	  buf[2] = idx * 2;
 	  len = EIBSendAPDU (con, 3, buf);
 	  if (len == -1)
-	    die ("Request failed");
+        die ("%s", "Request failed");
 	  usleep (step);
 	  FD_ZERO (&fds);
 	  FD_SET (fd, &fds);
@@ -324,7 +324,7 @@ main (int ac, char *ag[])
 		      printf ("Read value %02X\n", buf[2]);
 		      if (buf[2] < idx * 2)
 			{
-			  printf ("Abort dim\n");
+			  printf ("%s", "Abort dim\n");
 			  EIBClose (con);
 			  return 0;
 			}
@@ -334,7 +334,7 @@ main (int ac, char *ag[])
 
 	    }
 	}
-      printf ("Dimmed up\n");
+      printf ("%s", "Dimmed up\n");
     }
   else if (strcmp (ag[0], "log") == 0)
     {
@@ -342,7 +342,7 @@ main (int ac, char *ag[])
       FILE *log_fd = stderr;
 
       if (EIBOpenVBusmonitorText (con) == -1)
-	die ("Open Busmonitor failed");
+    die ("%s", "Open Busmonitor failed");
 
       while (1)
 	{
@@ -350,7 +350,7 @@ main (int ac, char *ag[])
 	  struct tm *loctim;
 	  len = EIBGetBusmonitorPacket (con, sizeof (buf), buf);
 	  if (len == -1)
-	    die ("Read failed");
+        die ("%s", "Read failed");
 	  clock = time (NULL);
 	  loctim = localtime (&clock);
 
@@ -397,12 +397,12 @@ main (int ac, char *ag[])
 	die ("usage: %s url", ag[0]);
 
       if (EIBOpenBusmonitorText (con) == -1)
-	die ("Open Busmonitor failed");
+    die ("%s", "Open Busmonitor failed");
       while (1)
 	{
 	  len = EIBGetBusmonitorPacket (con, sizeof (buf), buf);
 	  if (len == -1)
-	    die ("Read failed");
+        die ("%s", "Read failed");
 	  buf[len] = 0;
 	  printf ("%s\n", buf);
 	}
@@ -413,14 +413,14 @@ main (int ac, char *ag[])
 	die ("usage: %s url", ag[0]);
 
       if (EIBOpenBusmonitor (con) == -1)
-	die ("Open Busmonitor failed");
+    die ("%s", "Open Busmonitor failed");
       while (1)
 	{
 	  len = EIBGetBusmonitorPacket (con, sizeof (buf), buf);
 	  if (len == -1)
-	    die ("Read failed");
+        die ("%s", "Read failed");
 	  printHex (len, buf);
-	  printf ("\n");
+	  printf ("%s", "\n");
 	}
     }
   else if (strcmp (ag[0], "groupcacheclear") == 0)
@@ -439,7 +439,7 @@ main (int ac, char *ag[])
 
       len = EIB_Cache_Disable (con);
       if (len == -1)
-	die ("Disable failed");
+    die ("%s", "Disable failed");
     }
   else if (strcmp (ag[0], "groupcacheenable") == 0)
     {
@@ -447,7 +447,7 @@ main (int ac, char *ag[])
 	die ("usage: %s url", ag[0]);
       len = EIB_Cache_Enable (con);
       if (len == -1)
-	die ("Enable failed");
+    die ("%s", "Enable failed");
 
     }
   else if (strcmp (ag[0], "groupcacheread") == 0)
@@ -458,18 +458,18 @@ main (int ac, char *ag[])
 
       len = EIB_Cache_Read (con, dest, &src, sizeof (buf), buf);
       if (len == -1)
-	die ("Read failed");
+    die ("%s", "Read failed");
 
       switch (buf[1] & 0xC0)
 	{
 	case 0x40:
-	  printf ("Response");
+	  printf ("%s", "Response");
 	  break;
 	case 0x80:
-	  printf ("Write");
+	  printf ("%s", "Write");
 	  break;
 	}
-      printf (" from ");
+      printf ("%s", " from ");
       printIndividual (src);
       if (buf[1] & 0xC0)
 	{
@@ -479,7 +479,7 @@ main (int ac, char *ag[])
 	  else
 	    printHex (len - 2, buf + 2);
 	}
-      printf ("\n");
+      printf ("%s", "\n");
     }
   else if (strcmp (ag[0], "groupcachereadsync") == 0)
     {
@@ -493,28 +493,28 @@ main (int ac, char *ag[])
 
       len = EIB_Cache_Read_Sync (con, dest, &src, sizeof (buf), buf, age);
       if (len == -1)
-	die ("Read failed");
+    die ("%s", "Read failed");
 
       switch (buf[1] & 0xC0)
 	{
 	case 0x40:
-	  printf ("Response");
+	  printf ("%s", "Response");
 	  break;
 	case 0x80:
-	  printf ("Write");
+	  printf ("%s", "Write");
 	  break;
 	}
-      printf (" from ");
+      printf ("%s", " from ");
       printIndividual (src);
       if (buf[1] & 0xC0)
 	{
-	  printf (": ");
+	  printf ("%s", ": ");
 	  if (len == 2)
 	    printf ("%02X", buf[1] & 0x3F);
 	  else
 	    printHex (len - 2, buf + 2);
 	}
-      printf ("\n");
+      printf ("%s", "\n");
     }
   else if (strcmp (ag[0], "groupcacheremove") == 0)
     {
@@ -524,7 +524,7 @@ main (int ac, char *ag[])
 
       len = EIB_Cache_Remove (con, dest);
       if (len == -1)
-	die ("Remove failed");
+    die ("%s", "Remove failed");
     }
   else if (strcmp (ag[0], "grouplisten") == 0)
     {
@@ -533,48 +533,48 @@ main (int ac, char *ag[])
       dest = readgaddr (ag[2]);
 
       if (EIBOpenT_Group (con, dest, 0) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
 
       while (1)
 	{
 	  len = EIBGetAPDU_Src (con, sizeof (buf), buf, &src);
 	  if (len == -1)
-	    die ("Read failed");
+        die ("%s", "Read failed");
 	  if (len < 2)
-	    die ("Invalid Packet");
+        die ("%s", "Invalid Packet");
 	  if (buf[0] & 0x3 || (buf[1] & 0xC0) == 0xC0)
 	    {
-	      printf ("Unknown APDU from ");
+	      printf ("%s", "Unknown APDU from ");
 	      printIndividual (src);
-	      printf (": ");
+	      printf ("%s", ": ");
 	      printHex (len, buf);
-	      printf ("\n");
+	      printf ("%s", "\n");
 	    }
 	  else
 	    {
 	      switch (buf[1] & 0xC0)
 		{
 		case 0x00:
-		  printf ("Read");
+		  printf ("%s", "Read");
 		  break;
 		case 0x40:
-		  printf ("Response");
+		  printf ("%s", "Response");
 		  break;
 		case 0x80:
-		  printf ("Write");
+          printf ("%s", "Write");
 		  break;
 		}
-	      printf (" from ");
+	      printf ("%s", " from ");
 	      printIndividual (src);
 	      if (buf[1] & 0xC0)
 		{
-		  printf (": ");
+          printf ("%s", ": ");
 		  if (len == 2)
 		    printf ("%02X", buf[1] & 0x3F);
 		  else
 		    printHex (len - 2, buf + 2);
 		}
-	      printf ("\n");
+	      printf ("%s", "\n");
 	    }
 	}
     }
@@ -588,12 +588,12 @@ main (int ac, char *ag[])
       dest = readgaddr (ag[2]);
 
       if (EIBOpenT_Group (con, dest, 1) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
 
       len = EIBSendAPDU (con, 2, buf);
       if (len == -1)
-	die ("Request failed");
-      printf ("Send request\n");
+    die ("%s", "Request failed");
+      printf ("%s", "Send request\n");
     }
   else if (strcmp (ag[0], "groupreadresponse") == 0)
     {
@@ -606,12 +606,12 @@ main (int ac, char *ag[])
       dest = readgaddr (ag[2]);
 
       if (EIBOpenT_Group (con, dest, 0) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
 
       len = EIBSendAPDU (con, 2, req_buf);
       if (len == -1)
-	die ("Request failed");
-      printf ("Send request\n");
+    die ("%s", "Request failed");
+      printf ("%s", "Send request\n");
 
       while (1)
 	{
@@ -622,11 +622,11 @@ main (int ac, char *ag[])
 	  FD_SET (EIB_Poll_FD (con), &read);
 
 	  if (select (EIB_Poll_FD (con) + 1, &read, 0, 0, &tv) == -1)
-	    die ("select failed");
+        die ("%s", "select failed");
 
 	  len = EIB_Poll_Complete (con);
 	  if (len == -1)
-	    die ("Read failed");
+        die ("%s", "Read failed");
 	  if (len == 0)
 	    {
 	      if (tv.tv_sec == 0 && tv.tv_usec == 0)
@@ -636,42 +636,42 @@ main (int ac, char *ag[])
 
 	  len = EIBGetAPDU_Src (con, sizeof (buf), buf, &src);
 	  if (len == -1)
-	    die ("Read failed");
+        die ("%s", "Read failed");
 	  if (len < 2)
-	    die ("Invalid Packet");
+        die ("%s", "Invalid Packet");
 	  if (buf[0] & 0x3 || (buf[1] & 0xC0) == 0xC0)
 	    {
-	      printf ("Unknown APDU from ");
+	      printf ("%s", "Unknown APDU from ");
 	      printIndividual (src);
-	      printf (": ");
+	      printf ("%s", ": ");
 	      printHex (len, buf);
-	      printf ("\n");
+          printf ("%s", "\n");
 	    }
 	  else
 	    {
 	      switch (buf[1] & 0xC0)
 		{
 		case 0x00:
-		  printf ("Read");
+		  printf ("%s", "Read");
 		  break;
 		case 0x40:
-		  printf ("Response");
+		  printf ("%s", "Response");
 		  break;
 		case 0x80:
-		  printf ("Write");
+		  printf ("%s", "Write");
 		  break;
 		}
-	      printf (" from ");
+	      printf ("%s", " from ");
 	      printIndividual (src);
 	      if (buf[1] & 0xC0)
 		{
-		  printf (": ");
+		  printf ("%s", ": ");
 		  if (len == 2)
 		    printf ("%02X", buf[1] & 0x3F);
 		  else
 		    printHex (len - 2, buf + 2);
 		}
-	      printf ("\n");
+	      printf ("%s", "\n");
 	      switch (buf[1] & 0xC0)
 		{
 		case 0x80:
@@ -689,17 +689,17 @@ main (int ac, char *ag[])
 
       if (ac < 4)
 	die ("usage: %s url eibaddr val val ...", ag[0]);
-      die ("Open failed");
+      die ("%s", "Open failed");
       dest = readgaddr (ag[2]);
       len = readBlock (lbuf + 2, sizeof (lbuf) - 2, ac - 3, ag + 3);
 
       if (EIBOpenT_Group (con, dest, 1) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
 
       len = EIBSendAPDU (con, 2 + len, lbuf);
       if (len == -1)
-	die ("Request failed");
-      printf ("Send request\n");
+    die ("%s", "Request failed");
+      printf ("%s", "Send request\n");
     }
   else if (strcmp (ag[0], "groupsocketlisten") == 0)
     {
@@ -707,52 +707,52 @@ main (int ac, char *ag[])
 	die ("usage: %s url", ag[0]);
 
       if (EIBOpen_GroupSocket (con, 0) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
 
       while (1)
 	{
 	  len = EIBGetGroup_Src (con, sizeof (buf), buf, &src, &dest);
 	  if (len == -1)
-	    die ("Read failed");
+        die ("%s", "Read failed");
 	  if (len < 2)
-	    die ("Invalid Packet");
+        die ("%s", "Invalid Packet");
 	  if (buf[0] & 0x3 || (buf[1] & 0xC0) == 0xC0)
 	    {
-	      printf ("Unknown APDU from ");
+	      printf ("%s", "Unknown APDU from ");
 	      printIndividual (src);
-	      printf (" to ");
+	      printf ("%s", " to ");
 	      printGroup (dest);
-	      printf (": ");
+	      printf ("%s", ": ");
 	      printHex (len, buf);
-	      printf ("\n");
+	      printf ("%s", "\n");
 	    }
 	  else
 	    {
 	      switch (buf[1] & 0xC0)
 		{
 		case 0x00:
-		  printf ("Read");
+		  printf ("%s", "Read");
 		  break;
 		case 0x40:
-		  printf ("Response");
+		  printf ("%s", "Response");
 		  break;
 		case 0x80:
-		  printf ("Write");
+		  printf ("%s", "Write");
 		  break;
 		}
-	      printf (" from ");
+	      printf ("%s", " from ");
 	      printIndividual (src);
-	      printf (" to ");
+	      printf ("%s", " to ");
 	      printGroup (dest);
 	      if (buf[1] & 0xC0)
 		{
-		  printf (": ");
+		  printf ("%s", ": ");
 		  if (len == 2)
 		    printf ("%02X", buf[1] & 0x3F);
 		  else
 		    printHex (len - 2, buf + 2);
 		}
-	      printf ("\n");
+	      printf ("%s", "\n");
 	    }
 	}
     }
@@ -766,12 +766,12 @@ main (int ac, char *ag[])
       dest = readgaddr (ag[2]);
 
       if (EIBOpen_GroupSocket (con, 1) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
 
       len = EIBSendGroup (con, dest, 2, buf);
       if (len == -1)
-	die ("Request failed");
-      printf ("Send request\n");
+    die ("%s", "Request failed");
+      printf ("%s", "Send request\n");
     }
   else if (strcmp (ag[0], "groupsresponse") == 0)
     {
@@ -783,12 +783,12 @@ main (int ac, char *ag[])
       lbuf[1] |= readHex (ag[3]) & 0x3f;
 
       if (EIBOpenT_Group (con, dest, 1) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
 
       len = EIBSendAPDU (con, 2, lbuf);
       if (len == -1)
-	die ("Request failed");
-      printf ("Send request\n");
+    die ("%s", "Request failed");
+      printf ("%s", "Send request\n");
     }
   else if (strcmp (ag[0], "groupswrite") == 0)
     {
@@ -800,12 +800,12 @@ main (int ac, char *ag[])
       lbuf[1] |= readHex (ag[3]) & 0x3f;
 
       if (EIBOpenT_Group (con, dest, 1) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
 
       len = EIBSendAPDU (con, 2, lbuf);
       if (len == -1)
-	die ("Request failed");
-      printf ("Send request\n");
+    die ("%s", "Request failed");
+      printf ("%s", "Send request\n");
     }
   else if (strcmp (ag[0], "groupwrite") == 0)
     {
@@ -817,12 +817,12 @@ main (int ac, char *ag[])
       len = readBlock (lbuf + 2, sizeof (lbuf) - 2, ac - 3, ag + 3);
 
       if (EIBOpenT_Group (con, dest, 1) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
 
       len = EIBSendAPDU (con, 2 + len, lbuf);
       if (len == -1)
-	die ("Request failed");
-      printf ("Send request\n");
+    die ("%s", "Request failed");
+      printf ("%s", "Send request\n");
 
     }
   else if (strcmp (ag[0], "madcread") == 0)
@@ -839,12 +839,12 @@ main (int ac, char *ag[])
       len = atoi (ag[4]);
 
       if (EIB_MC_Connect (con, dest) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
       auth (con);
 
       len = EIB_MC_ReadADC (con, channel, len, &val);
       if (len == -1)
-	die ("Read failed");
+    die ("%s", "Read failed");
       printf ("Value: %d\n", val);
     }
   else if (strcmp (ag[0], "maskver") == 0)
@@ -855,7 +855,7 @@ main (int ac, char *ag[])
 
       len = EIB_M_GetMaskVersion (con, dest);
       if (len == -1)
-	die ("Read failed");
+    die ("%s", "Read failed");
       printf ("Mask: %04X\n", len);
     }
   else if (strcmp (ag[0], "mmaskver") == 0)
@@ -868,12 +868,12 @@ main (int ac, char *ag[])
       dest = readaddr (ag[2]);
 
       if (EIB_MC_Connect (con, dest) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
       auth (con);
 
       len = EIB_MC_GetMaskVersion (con);
       if (len == -1)
-	die ("Read failed");
+    die ("%s", "Read failed");
       printf ("Mask: %04X\n", len);
     }
   else if (strcmp (ag[0], "mpeitype") == 0)
@@ -886,12 +886,12 @@ main (int ac, char *ag[])
       dest = readaddr (ag[2]);
 
       if (EIB_MC_Connect (con, dest) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
       auth (con);
 
       len = EIB_MC_GetPEIType (con);
       if (len == -1)
-	die ("Read failed");
+    die ("%s", "Read failed");
       printf ("PEI: %d\n", len);
     }
   else if (strcmp (ag[0], "mprogmodeoff") == 0)
@@ -904,12 +904,12 @@ main (int ac, char *ag[])
       dest = readaddr (ag[2]);
 
       if (EIB_MC_Connect (con, dest) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
       auth (con);
 
       len = EIB_MC_Progmode_Off (con);
       if (len == -1)
-	die ("Set failed");
+    die ("%s", "Set failed");
     }
   else if (strcmp (ag[0], "mprogmodeon") == 0)
     {
@@ -921,12 +921,12 @@ main (int ac, char *ag[])
       dest = readaddr (ag[2]);
 
       if (EIB_MC_Connect (con, dest) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
       auth (con);
 
       len = EIB_MC_Progmode_On (con);
       if (len == -1)
-	die ("Set failed");
+    die ("%s", "Set failed");
     }
   else if (strcmp (ag[0], "mprogmodestatus") == 0)
     {
@@ -938,16 +938,16 @@ main (int ac, char *ag[])
       dest = readaddr (ag[2]);
 
       if (EIB_MC_Connect (con, dest) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
       auth (con);
 
       len = EIB_MC_Progmode_Status (con);
       if (len == -1)
-	die ("Set failed");
+    die ("%s", "Set failed");
       if (len)
-	printf ("in programming mode\n");
+	printf ("%s", "in programming mode\n");
       else
-	printf ("not in programming mode\n");
+	printf ("%s", "not in programming mode\n");
 
     }
   else if (strcmp (ag[0], "mprogmodetoggle") == 0)
@@ -960,12 +960,12 @@ main (int ac, char *ag[])
       dest = readaddr (ag[2]);
 
       if (EIB_MC_Connect (con, dest) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
       auth (con);
 
       len = EIB_MC_Progmode_Toggle (con);
       if (len == -1)
-	die ("Set failed");
+    die ("%s", "Set failed");
     }
   else if (strcmp (ag[0], "mpropdesc") == 0)
     {
@@ -982,12 +982,12 @@ main (int ac, char *ag[])
       prop = atoi (ag[4]);
 
       if (EIB_MC_Connect (con, dest) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
       auth (con);
 
       len = EIB_MC_PropertyDesc (con, obj, prop, &type, &count, &access);
       if (len == -1)
-	die ("Read failed");
+    die ("%s", "Read failed");
       printf ("Property: type:%d count:%d access:%02X\n", type, count,
 	      access);
     }
@@ -1007,14 +1007,14 @@ main (int ac, char *ag[])
       nr_of_elem = atoi (ag[6]);
 
       if (EIB_MC_Connect (con, dest) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
       auth (con);
 
       len =
 	EIB_MC_PropertyRead (con, obj, prop, start, nr_of_elem, sizeof (buf),
 			     buf);
       if (len == -1)
-	die ("Read failed");
+    die ("%s", "Read failed");
       printHex (len, buf);
 
     }
@@ -1029,12 +1029,12 @@ main (int ac, char *ag[])
       dest = readaddr (ag[2]);
 
       if (EIB_MC_Connect (con, dest) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
       auth (con);
 
       len = EIB_MC_PropertyScan (con, sizeof (buf), buf);
       if (len == -1)
-	die ("Read failed");
+    die ("%s", "Read failed");
       for (i = 0; i < len; i += 6)
 	if (buf[i + 1] == 1 && buf[i + 2] == 4)
 	  printf ("Obj: %d Property: %d Type: %d Objtype:%d Access:%02X\n",
@@ -1058,26 +1058,26 @@ main (int ac, char *ag[])
       dest = readaddr (ag[2]);
 
       if (EIB_MC_Connect (con, dest) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
       auth (con);
 
       len = EIB_MC_PropertyScan_async (con, sizeof (buf), buf);
       if (len == -1)
-	die ("Read failed");
+    die ("%s", "Read failed");
 
     lp0:
       FD_ZERO (&read);
       FD_SET (EIB_Poll_FD (con), &read);
-      printf ("Waiting\n");
+      printf ("%s", "Waiting\n");
       if (select (EIB_Poll_FD (con) + 1, &read, 0, 0, 0) == -1)
 	die ("select failed");
-      printf ("Data available\n");
+      printf ("%s", "Data available\n");
       len = EIB_Poll_Complete (con);
       if (len == -1)
 	die ("Read failed");
       if (len == 0)
 	goto lp0;
-      printf ("Completed\n");
+      printf ("%s", "Completed\n");
 
       len = EIBComplete (con);
 
@@ -1111,17 +1111,17 @@ main (int ac, char *ag[])
       len = readBlock (buf, sizeof (buf), ac - 7, ag + 7);
 
       if (EIB_MC_Connect (con, dest) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
       auth (con);
 
-      printf ("Write: ");
+      printf ("%s", "Write: ");
       printHex (len, buf);
-      printf ("\n");
+      printf ("%s", "\n");
       len =
 	EIB_MC_PropertyWrite (con, obj, prop, start, nr_of_elem, len, buf,
 			      sizeof (res), res);
       if (len == -1)
-	die ("Write failed");
+    die ("%s", "Write failed");
       printHex (len, res);
     }
   else if (strcmp (ag[0], "mread") == 0)
@@ -1137,12 +1137,12 @@ main (int ac, char *ag[])
       len = atoi (ag[4]);
 
       if (EIB_MC_Connect (con, dest) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
       auth (con);
 
       len = EIB_MC_Read (con, addr, len, buf);
       if (len == -1)
-	die ("Read failed");
+    die ("%s", "Read failed");
       printHex (len, buf);
     }
   else if (strcmp (ag[0], "mrestart") == 0)
@@ -1155,12 +1155,12 @@ main (int ac, char *ag[])
       dest = readaddr (ag[2]);
 
       if (EIB_MC_Connect (con, dest) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
       auth (con);
 
       len = EIB_MC_Restart (con);
       if (len == -1)
-	die ("Restart failed");
+    die ("%s", "Restart failed");
 
     }
   else if (strcmp (ag[0], "msetkey") == 0)
@@ -1181,12 +1181,12 @@ main (int ac, char *ag[])
       key[3] = (k >> 0) & 0xff;
 
       if (EIB_MC_Connect (con, dest) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
       auth (con);
 
       k = EIB_MC_SetKey (con, key, level);
       if (k == -1)
-	die ("SetKey failed");
+    die ("%s", "SetKey failed");
 
     }
   else if (strcmp (ag[0], "mwrite") == 0)
@@ -1202,15 +1202,15 @@ main (int ac, char *ag[])
       len = readBlock (buf, sizeof (buf), ac - 4, ag + 4);
 
       if (EIB_MC_Connect (con, dest) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
       auth (con);
 
-      printf ("Write: ");
+      printf ("%s", "Write: ");
       printHex (len, buf);
-      printf ("\n");
+      printf ("%s", "\n");
       len = EIB_MC_Write (con, addr, len, buf);
       if (len == -1)
-	die ("Write failed");
+    die ("%s", "Write failed");
 
     }
   else if (strcmp (ag[0], "mwriteplain") == 0)
@@ -1227,15 +1227,15 @@ main (int ac, char *ag[])
       len = readBlock (buf, sizeof (buf), ac - 4, ag + 4);
 
       if (EIB_MC_Connect (con, dest) == -1)
-	die ("Connect failed");
+    die ("%s", "Connect failed");
       auth (con);
 
-      printf ("Write: ");
+      printf ("%s", "Write: ");
       printHex (len, buf);
-      printf ("\n");
+      printf ("%s", "\n");
       len = EIB_MC_Write_Plain (con, addr, len, buf);
       if (len == -1)
-	die ("Write failed");
+    die ("%s", "Write failed");
     }
   else if (strcmp (ag[0], "progmodeoff") == 0)
     {
@@ -1245,7 +1245,7 @@ main (int ac, char *ag[])
 
       len = EIB_M_Progmode_Off (con, dest);
       if (len == -1)
-	die ("Set failed");
+    die ("%s", "Set failed");
     }
   else if (strcmp (ag[0], "progmodeon") == 0)
     {
@@ -1255,7 +1255,7 @@ main (int ac, char *ag[])
 
       len = EIB_M_Progmode_On (con, dest);
       if (len == -1)
-	die ("Set failed");
+    die ("%s", "Set failed");
 
     }
   else if (strcmp (ag[0], "progmodestatus") == 0)
@@ -1266,11 +1266,11 @@ main (int ac, char *ag[])
 
       len = EIB_M_Progmode_Status (con, dest);
       if (len == -1)
-	die ("Set failed");
+    die ("%s", "Set failed");
       if (len)
-	printf ("in programming mode\n");
+	printf ("%s", "in programming mode\n");
       else
-	printf ("not in programming mode\n");
+	printf ("%s", "not in programming mode\n");
     }
   else if (strcmp (ag[0], "progmodetoggle") == 0)
     {
@@ -1280,7 +1280,7 @@ main (int ac, char *ag[])
 
       len = EIB_M_Progmode_Toggle (con, dest);
       if (len == -1)
-	die ("Set failed");
+    die ("%s", "Set failed");
     }
   else if (strcmp (ag[0], "readindividual") == 0)
     {
@@ -1291,12 +1291,12 @@ main (int ac, char *ag[])
 
       len = EIB_M_ReadIndividualAddresses (con, sizeof (buf), buf);
       if (len == -1)
-	die ("Read failed");
+    die ("%s", "Read failed");
       for (i = 0; i < len; i += 2)
 	{
-	  printf ("Addr: ");
+	  printf ("%s", "Addr: ");
 	  printIndividual ((buf[i] << 8) | buf[i + 1]);
-	  printf ("\n");
+	  printf ("%s", "\n");
 	}
     }
   else if (strcmp (ag[0], "vbusmonitor1") == 0)
@@ -1305,13 +1305,13 @@ main (int ac, char *ag[])
 	die ("usage: %s url", ag[0]);
 
       if (EIBOpenVBusmonitorText (con) == -1)
-	die ("Open Busmonitor failed");
+    die ("%s", "Open Busmonitor failed");
 
       while (1)
 	{
 	  len = EIBGetBusmonitorPacket (con, sizeof (buf), buf);
 	  if (len == -1)
-	    die ("Read failed");
+        die ("%s", "Read failed");
 	  buf[len] = 0;
 	  printf ("%s\n", buf);
 	}
@@ -1325,27 +1325,27 @@ main (int ac, char *ag[])
 	die ("usage: %s url", ag[0]);
 
       if (EIBOpenVBusmonitorText (con) == -1)
-	die ("Open Busmonitor failed");
+    die ("%s", "Open Busmonitor failed");
 
       while (1)
 	{
 	lp1:
 	  FD_ZERO (&read);
 	  FD_SET (EIB_Poll_FD (con), &read);
-	  printf ("Waiting\n");
+	  printf ("%s", "Waiting\n");
 	  if (select (EIB_Poll_FD (con) + 1, &read, 0, 0, 0) == -1)
 	    die ("select failed");
-	  printf ("Data available\n");
+	  printf ("%s", "Data available\n");
 	  len = EIB_Poll_Complete (con);
 	  if (len == -1)
-	    die ("Read failed");
+        die ("%s", "Read failed");
 	  if (len == 0)
 	    goto lp1;
-	  printf ("Completed\n");
+	  printf ("%s", "Completed\n");
 
 	  len = EIBGetBusmonitorPacket (con, sizeof (buf), buf);
 	  if (len == -1)
-	    die ("Read failed");
+        die ("%s", "Read failed");
 	  printf ("%s\n", buf);
 	}
 
@@ -1356,15 +1356,15 @@ main (int ac, char *ag[])
 	die ("usage: %s url", ag[0]);
 
       if (EIBOpenVBusmonitor (con) == -1)
-	die ("Open Busmonitor failed");
+    die ("%s", "Open Busmonitor failed");
 
       while (1)
 	{
 	  len = EIBGetBusmonitorPacket (con, sizeof (buf), buf);
 	  if (len == -1)
-	    die ("Read failed");
+        die ("%s", "Read failed");
 	  printHex (len, buf);
-	  printf ("\n");
+	  printf ("%s", "\n");
 	}
     }
   else if (strcmp (ag[0], "writeaddress") == 0)
@@ -1375,7 +1375,7 @@ main (int ac, char *ag[])
 
       len = EIB_M_WriteIndividualAddress (con, dest);
       if (len == -1)
-	die ("Set failed");
+    die ("%s", "Set failed");
 
     }
   else

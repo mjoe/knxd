@@ -31,7 +31,7 @@ die (const char *msg, ...)
   va_list ap;
   va_start (ap, msg);
   vprintf (msg, ap);
-  printf ("\n");
+  printf ("%s", "\n");
   va_end (ap);
 
   exit (1);
