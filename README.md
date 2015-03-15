@@ -1,11 +1,10 @@
-knxd [![Build Status](https://travis-ci.org/mjoe/knxd.svg)](https://travis-ci.org/mjoe/knxd)
+knxd [![Build Status](https://travis-ci.org/knxd/knxd.svg)](https://travis-ci.org/knxd/knxd)
 ====
 
 This is a fork of eibd 0.0.5 (from bcusdk)
 https://www.auto.tuwien.ac.at/~mkoegler/index.php/bcusdk
 
-For a history (in German) please also see:
-http://knx-user-forum.de/knx-eib-forum/38982-eibd-war-bcusdk-fork-knxd.html
+For a (german only) history and discussion why knxd emerged please also see: [eibd(war bcusdk) Fork -> knxd](http://knx-user-forum.de/forum/öffentlicher-bereich/knx-eib-forum/39972-eibd-war-bcusdk-fork-knxd)
 
 ## Building
 
@@ -13,19 +12,18 @@ http://knx-user-forum.de/knx-eib-forum/38982-eibd-war-bcusdk-fork-knxd.html
 
 On Debian:
 
-    apt-get install build-essential libtool automake pkg-config
+    apt-get install build-essential libtool automake pkg-config cdbs
     wget https://www.auto.tuwien.ac.at/~mkoegler/pth/pthsem_2.0.8.tar.gz
     tar xzf pthsem_2.0.8.tar.gz
     cd pthsem-2.0.8
-    ./configure
-    make
-    make install
+    dpkg-buildpackage
+    sudo dpkg -i ../libpthsem*.deb
 
 ### knxd
 
     ./bootstrap.sh
-    LD_LIBRARY_PATH=/usr/local/lib ./configure
-    make && make install
+    dpkg-buildpackage
+    sudo dpkg -i ../knxd*.deb
 
 ## Contributions
 
