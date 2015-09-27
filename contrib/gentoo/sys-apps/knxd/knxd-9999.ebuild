@@ -1,5 +1,9 @@
+# Copyright 1999-2015 Gentoo Foundation
+# Distributed under the terms of the GNU General Public License v2
+# $Header: $
 # Author: Michael Kefeder (m.kefeder@gmail.com)
 # Author: Patrik Pfaffenbauer (patrik.pfaffenbauer@p3.co.at)
+# Author: Marc Joliet (marcec@gmx.de)
 
 EAPI="5"
 
@@ -11,14 +15,14 @@ HOMEPAGE="https://github.com/Makki1/knxd"
 LICENSE="GPL-2"
 SLOT="9999"
 KEYWORDS=""
-IUSE="eibd ft12 pei16 tpuart pei16s tpuarts eibnetip eibnetiptunnel eibnetipserver usb groupcache java ncn5120"
+IUSE="eibd ft12 pei16s tpuarts eibnetip eibnetiptunnel eibnetipserver usb groupcache java ncn5120 dummy"
 
 DEPEND="dev-libs/pthsem"
 
 EGIT_REPO_URI="https://github.com/Makki1/knxd.git"
 
 src_prepare() {
-    eautoreconf || die "eautotooling failed"
+	eautoreconf || die "eautotooling failed"
 }
 
 src_configure() {
@@ -26,8 +30,6 @@ src_configure() {
 #        --without-pth-test \
     econf \
         $(use_enable ft12) \
-        $(use_enable pei16) \
-        $(use_enable tpuart) \
         $(use_enable pei16s) \
         $(use_enable tpuarts) \
         $(use_enable eibnetip) \
@@ -45,14 +47,11 @@ src_compile() {
 }
 
 src_install() {
-    emake DESTDIR="${D}" install
+	emake DESTDIR="${D}" install
 
-    einfo "Installing init-script and config"
+	einfo "Installing init-script and config"
 
-    sed -e "s|@SLOT@|${SLOT}|g" \
-               "${FILESDIR}/${PN}.confd" | newconfd - ${PN}-${SLOT}
-
-    sed -e "s|@SLOT@|${SLOT}|g" \
+	sed -e "s|@SLOT@|${SLOT}|g" \
                "${FILESDIR}/${PN}.init" | newinitd - ${PN}-${SLOT}
 
 }
