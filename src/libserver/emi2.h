@@ -20,39 +20,28 @@
 #ifndef EIB_EMI2_H
 #define EIB_EMI2_H
 
-#include "layer2.h"
-#include "lowlevel.h"
+#include "emi_common.h"
 
 /** EMI2 backend */
-class EMI2Layer2:public Layer2, private Thread
+class EMI2Driver:public EMI_Common
 {
-  /** driver to send/receive */
-  LowLevelDriver *iface;
-  /** semaphore for inqueue */
-  pth_sem_t in_signal;
-  /** input queue */
-  Queue < LPDU * >inqueue;
-  bool noqueue;
+  bool reset_ack_wait = false;
+  ev::timer reset_timer;
 
-  void Send (LPDU * l);
-  void Run (pth_sem_t * stop);
-  const char *Name() { return "emi2"; }
+  void cmdEnterMonitor();
+  void cmdLeaveMonitor();
+  void cmdOpen();
+  void cmdClose();
+  void started(); // do sendReset
+  const uint8_t * getIndTypes();
+  EMIVer getVersion() { return vEMI2; }
+  void sendLocal_done_cb(bool success);
+  void reset_timer_cb(ev::timer& w, int revents);
+  enum { N_bad, N_up, N_want_close, N_want_leave, N_down, N_open, N_enter } sendLocal_done_next = N_bad;
 public:
-  EMI2Layer2 (LowLevelDriver * i, Layer3 * l3, L2options *opt);
-  ~EMI2Layer2 ();
-  bool init ();
-
-  void Send_L_Data (LPDU * l);
-
-  bool addAddress (eibaddr_t addr);
-  bool removeAddress (eibaddr_t addr);
-
-  bool enterBusmonitor ();
-  bool leaveBusmonitor ();
-
-  bool Open ();
-  bool Close ();
-  bool Send_Queue_Empty ();
+  EMI2Driver (LowLevelIface* c, IniSectionPtr& s, LowLevelDriver *i = nullptr);
+  virtual ~EMI2Driver ();
+  void do_send_Next();
 };
 
 #endif

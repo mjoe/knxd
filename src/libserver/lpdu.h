@@ -20,9 +20,17 @@
 #ifndef LPDU_H
 #define LPDU_H
 
-#include "common.h"
+#include <memory>
 
-class Layer2;
+class LPDU;
+class L_Data_PDU;
+class L_Busmonitor_PDU;
+typedef std::unique_ptr<LPDU> LPDUPtr;
+typedef std::unique_ptr<L_Data_PDU> LDataPtr;
+typedef std::unique_ptr<L_Busmonitor_PDU> LBusmonPtr;
+
+#include "common.h"
+#include "link.h"
 
 /** enumartion of Layer 2 frame types*/
 typedef enum
@@ -44,33 +52,22 @@ typedef enum
 }
 LPDU_Type;
 
-class Layer2;
-
 /** represents a Layer 2 frame */
 class LPDU
 {
 public:
-  Layer2 *l2;
-  explicit LPDU (Layer2 *layer2)
-  {
-    object = 0;
-    l2 = layer2;
-  }
-  virtual ~LPDU ()
-  {
-  }
+  LPDU () { }
+  virtual ~LPDU () { }
 
   virtual bool init (const CArray & c) = 0;
   /** convert to a character array */
   virtual CArray ToPacket () = 0;
   /** decode content as string */
-  virtual String Decode () = 0;
+  virtual String Decode (TracePtr t) = 0;
   /** get frame type */
   virtual LPDU_Type getType () const = 0;
   /** converts a character array to a Layer 2 frame */
-  static LPDU *fromPacket (const CArray & c, Layer2 * layer2);
-
-  void *object;
+  static LPDUPtr fromPacket (const CArray & c, TracePtr t);
 };
 
 /* L_Unknown */
@@ -81,11 +78,11 @@ public:
   /** real content*/
   CArray pdu;
 
-  L_Unknown_PDU (Layer2 *layer2);
+  L_Unknown_PDU ();
 
   bool init (const CArray & c);
   CArray ToPacket ();
-  String Decode ();
+  String Decode (TracePtr t);
   LPDU_Type getType () const
   {
     return L_Unknown;
@@ -112,11 +109,11 @@ public:
   /** payload of Layer 4 */
   CArray data;
 
-  L_Data_PDU (Layer2 *layer2);
+  L_Data_PDU ();
 
   bool init (const CArray & c);
   CArray ToPacket ();
-  String Decode ();
+  String Decode (TracePtr t);
   LPDU_Type getType () const
   {
     return (valid_length ? L_Data : L_Data_Part);
@@ -133,11 +130,11 @@ public:
   uint8_t status;
   uint32_t timestamp;
 
-  L_Busmonitor_PDU (Layer2 *layer2);
+  L_Busmonitor_PDU ();
 
   bool init (const CArray & c);
   CArray ToPacket ();
-  String Decode ();
+  String Decode (TracePtr t);
   LPDU_Type getType () const
   {
     return L_Busmonitor;
@@ -148,11 +145,11 @@ class L_ACK_PDU:public LPDU
 {
 public:
 
-  L_ACK_PDU (Layer2 *layer2);
+  L_ACK_PDU ();
 
   bool init (const CArray & c);
   CArray ToPacket ();
-  String Decode ();
+  String Decode (TracePtr t);
   LPDU_Type getType () const
   {
     return L_ACK;
@@ -163,11 +160,11 @@ class L_NACK_PDU:public LPDU
 {
 public:
 
-  explicit L_NACK_PDU (Layer2 *layer2);
+  explicit L_NACK_PDU ();
 
   bool init (const CArray & c);
   CArray ToPacket ();
-  String Decode ();
+  String Decode (TracePtr t);
   LPDU_Type getType () const
   {
     return L_NACK;
@@ -178,11 +175,11 @@ class L_BUSY_PDU:public LPDU
 {
 public:
 
-  L_BUSY_PDU (Layer2 *layer2);
+  L_BUSY_PDU ();
 
   bool init (const CArray & c);
   CArray ToPacket ();
-  String Decode ();
+  String Decode (TracePtr t);
   LPDU_Type getType () const
   {
     return L_BUSY;
@@ -193,8 +190,10 @@ public:
 class L_Busmonitor_CallBack
 {
 public:
+  L_Busmonitor_CallBack(std::string& n) : name(n) { }
+  std::string& name;
   /** callback: a bus monitor frame has been received */
-  virtual void Send_L_Busmonitor (L_Busmonitor_PDU * l) = 0;
+  virtual void send_L_Busmonitor (LBusmonPtr l) = 0;
 };
 
 #endif

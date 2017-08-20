@@ -23,324 +23,425 @@
 
 #include "ft12.h"
 
-FT12LowLevelDriver::FT12LowLevelDriver (const char *dev, Trace * tr)
+#include "emi.h"
+#include "emi1.h"
+#include "emi2.h"
+#include "cemi.h"
+
+#include "llserial.h"
+#include "lltcp.h"
+#include "log.h"
+
+FT12Driver::~FT12Driver() {}
+FT12cemiDriver::~FT12cemiDriver() {}
+
+class FT12serial : public LLserial
 {
-  struct termios t1;
-  t = tr;
-  pth_sem_init (&in_signal);
-  pth_sem_init (&out_signal);
-  pth_sem_init (&send_empty);
-  pth_sem_set_value (&send_empty, 1);
-  getwait = pth_event (PTH_EVENT_SEM, &out_signal);
-
-  TRACEPRINTF (t, 1, this, "Open");
-
-  fd = open (dev, O_RDWR | O_NOCTTY | O_NDELAY | O_SYNC);
-  if (fd == -1)
-    return;
-  set_low_latency (fd, &sold);
-
-  close (fd);
-
-  fd = open (dev, O_RDWR | O_NOCTTY);
-  if (fd == -1)
-    return;
-  if (tcgetattr (fd, &old))
+public:
+  FT12serial(LowLevelIface* a, IniSectionPtr& b) : LLserial(a,b) { t->setAuxName("FT12_ser"); }
+  virtual ~FT12serial() {}
+protected:
+  void termios_settings (struct termios &t1)
     {
-      restore_low_latency (fd, &sold);
-      close (fd);
-      fd = -1;
-      return;
+      t1.c_cflag = CS8 | CLOCAL | CREAD | PARENB;
+      t1.c_iflag = IGNBRK | INPCK | ISIG;
+      t1.c_oflag = 0;
+      t1.c_lflag = 0;
+      t1.c_cc[VTIME] = 1;
+      t1.c_cc[VMIN] = 0;
+    }
+  unsigned int default_baudrate() { return 19200; }
+};
+
+bool
+FT12Driver::make_EMI()
+{
+  switch (getVersion())
+    {
+    case vEMI1:
+      iface = new EMI1Driver (this,cfg, iface);
+      break;
+    case vEMI2:
+      iface = new EMI2Driver (this,cfg, iface);
+      break;
+    case vCEMI:
+      iface = new FT12CEMIDriver (this,cfg, iface);
+      break;
+    case vRaw:
+      break;
+    case vUnknown:
+      return false;
+    default: 
+      TRACEPRINTF (t, 2, "Unsupported EMI");
+      return false;
     }
 
-  if (tcgetattr (fd, &t1))
-    {
-      restore_low_latency (fd, &sold);
-      close (fd);
-      fd = -1;
-      return;
-    }
-  t1.c_cflag = CS8 | PARENB | CLOCAL | CREAD;
-  t1.c_iflag = IGNBRK | INPCK | ISIG;
-  t1.c_oflag = 0;
-  t1.c_lflag = 0;
-  t1.c_cc[VTIME] = 1;
-  t1.c_cc[VMIN] = 0;
-  cfsetospeed (&t1, B19200);
-  cfsetispeed (&t1, 0);
-
-  if (tcsetattr (fd, TCSAFLUSH, &t1))
-    {
-      restore_low_latency (fd, &sold);
-      close (fd);
-      fd = -1;
-      return;
-    }
-  sendflag = 0;
-  recvflag = 0;
-  repeatcount = 0;
-  Start ();
-  TRACEPRINTF (t, 1, this, "Opened");
-}
-
-FT12LowLevelDriver::~FT12LowLevelDriver ()
-{
-  Stop ();
-  pth_event_free (getwait, PTH_FREE_THIS);
-
-  while (!outqueue.isempty ())
-    delete outqueue.get ();
-
-  TRACEPRINTF (t, 1, this, "Close");
-  if (fd != -1)
-    {
-      tcsetattr (fd, TCSAFLUSH, &old);
-      restore_low_latency (fd, &sold);
-      close (fd);
-    }
-}
-
-bool FT12LowLevelDriver::init ()
-{
-  return fd != -1;
-}
-
-void
-FT12LowLevelDriver::Send_Packet (CArray l)
-{
-  CArray pdu;
-  uchar c;
-  unsigned i;
-  t->TracePacket (1, this, "Send", l);
-
-  assert (l () <= 32);
-  pdu.resize (l () + 7);
-  pdu[0] = 0x68;
-  pdu[1] = l () + 1;
-  pdu[2] = l () + 1;
-  pdu[3] = 0x68;
-  if (sendflag)
-    pdu[4] = 0x53;
-  else
-    pdu[4] = 0x73;
-  sendflag = !sendflag;
-
-  pdu.setpart (l.array (), 5, l ());
-  c = pdu[4];
-  for (i = 0; i < l (); i++)
-    c += l[i];
-  pdu[pdu () - 2] = c;
-  pdu[pdu () - 1] = 0x16;
-
-  inqueue.put (pdu);
-  pth_sem_set_value (&send_empty, 0);
-  pth_sem_inc (&in_signal, TRUE);
-}
-
-void
-FT12LowLevelDriver::SendReset ()
-{
-  CArray pdu;
-  TRACEPRINTF (t, 1, this, "SendReset");
-  pdu.resize (4);
-  pdu[0] = 0x10;
-  pdu[1] = 0x40;
-  pdu[2] = 0x40;
-  pdu[3] = 0x16;
-  sendflag = 0;
-  recvflag = 0;
-  inqueue.put (pdu);
-  pth_sem_set_value (&send_empty, 0);
-  pth_sem_inc (&in_signal, TRUE);
+  if (t->ShowPrint(0))
+    iface = new LLlog (this,cfg, iface);
+  return iface->setup();
 }
 
 bool
-FT12LowLevelDriver::Send_Queue_Empty ()
+FT12Driver::setup()
 {
-  return inqueue.isempty ();
+  FDdriver *fdd;
+
+  iface = new FT12wrap(this, cfg);
+
+  if (t->ShowPrint(0))
+    iface = new LLlog (this,cfg, iface);
+
+  if(!LowLevelAdapter::setup())
+    goto ex1;
+
+  if (!make_EMI())
+    goto ex1;
+
+  return true;
+
+ex1:
+  return false;
 }
 
-pth_sem_t *
-FT12LowLevelDriver::Send_Queue_Empty_Cond ()
+FT12wrap::FT12wrap (LowLevelIface* c, IniSectionPtr& s, LowLevelDriver *i) : LowLevelFilter(c,s,i)
 {
-  return &send_empty;
+  t->setAuxName("ft12wrap");
 }
 
-CArray *
-FT12LowLevelDriver::Get_Packet (pth_event_t stop)
+bool
+FT12wrap::setup()
 {
-  if (stop != NULL)
-    pth_event_concat (getwait, stop, NULL);
-
-  pth_wait (getwait);
-
-  if (stop)
-    pth_event_isolate (getwait);
-
-  if (pth_event_status (getwait) == PTH_STATUS_OCCURRED)
+  if (cfg->value("device","").length() > 0)
     {
-      pth_sem_dec (&out_signal);
-      CArray *c = outqueue.get ();
-      t->TracePacket (1, this, "Recv", *c);
-      return c;
+      if (cfg->value("ip-address","").length() > 0 ||
+          cfg->value("port",-1) != -1)
+        {
+          ERRORPRINTF (t, E_ERROR, "Don't specify both device and IP options!");
+          return false;
+        }
+      iface = new FT12serial(this, cfg);
     }
   else
-    return 0;
+    {
+      if (cfg->value("baudrate",-1) != -1)
+        {
+          ERRORPRINTF (t, E_ERROR, "Don't specify both device and IP options!");
+          return false;
+        }
+      iface = new LLtcp(this, cfg);
+    }
+  
+  if (t->ShowPrint(0))
+    iface = new LLlog (this,cfg, iface);
+
+  if (!iface->setup())
+    return false;
+
+  return true;
+}
+
+
+void
+FT12wrap::start()
+{
+  TRACEPRINTF (t, 1, "Open");
+
+  setup_buffers();
+
+  sendflag = false;
+  recvflag = false;
+  next_free = true;
+  send_wait = false;
+  in_reader = false;
+
+  repeatcount = 0;
+  TRACEPRINTF (t, 1, "Opened");
+  LowLevelFilter::start();
+  return;
 }
 
 void
-FT12LowLevelDriver::Run (pth_sem_t * stop1)
+FT12wrap::setup_buffers()
 {
-  CArray last;
-  unsigned int i;
-  uchar buf[255];
+  timer.set <FT12wrap,&FT12wrap::timer_cb> (this);
+  sendtimer.set <FT12wrap,&FT12wrap::sendtimer_cb> (this);
 
-  pth_event_t stop = pth_event (PTH_EVENT_SEM, stop1);
-  pth_event_t input = pth_event (PTH_EVENT_SEM, &in_signal);
-  pth_event_t timeout = pth_event (PTH_EVENT_RTIME, pth_time (0, 100000));
-  while (pth_event_status (stop) != PTH_STATUS_OCCURRED)
+  trigger.set<FT12wrap,&FT12wrap::trigger_cb>(this);
+  trigger.start();
+}
+
+void 
+FT12wrap::stop_()
+{
+  // XXX TODO add de-registration callback
+
+  timer.stop();
+  sendtimer.stop();
+  trigger.stop();
+}
+
+void 
+FT12wrap::stop()
+{
+  TRACEPRINTF (t, 1, "Close");
+
+  stop_();
+  LowLevelFilter::stop();
+}
+
+FT12wrap::~FT12wrap ()
+{
+  stop_ ();
+}
+
+void
+FT12wrap::send_Data (CArray& l)
+{
+  do_send_Local (l, 0);
+}
+
+void
+FT12wrap::do_send_Local (CArray& l, int raw)
+{
+  if(out.size() > 0)
     {
-      pth_event_isolate (input);
-      pth_event_isolate (timeout);
-      if (mode == 0)
-	pth_event_concat (stop, input, NULL);
-      if (mode == 1)
-	pth_event_concat (stop, timeout, NULL);
-
-      i = pth_read_ev (fd, buf, sizeof (buf), stop);
-      if (i > 0)
-	{
-	  t->TracePacket (0, this, "Recv", i, buf);
-	  akt.setpart (buf, akt (), i);
-	}
-
-      while (akt.len () > 0)
-	{
-	  if (akt[0] == 0xE5 && mode == 1)
-	    {
-	      pth_sem_dec (&in_signal);
-	      inqueue.get ();
-	      if (inqueue.isempty ())
-		pth_sem_set_value (&send_empty, 1);
-	      akt.deletepart (0, 1);
-	      mode = 0;
-	      repeatcount = 0;
-	    }
-	  else if (akt[0] == 0x10)
-	    {
-	      if (akt () < 4)
-		break;
-	      if (akt[1] == akt[2] && akt[3] == 0x16)
-		{
-		  uchar c1 = 0xE5;
-		  t->TracePacket (0, this, "Send Ack", 1, &c1);
-		  if(write (fd, &c1, 1) != 1)
-		    {
-		      ERRORPRINTF (t, E_ERROR | 10, this, "write error (%s)", strerror(errno));
-		      break;
-		    }
-		  if ((akt[1] == 0xF3 && !recvflag) ||
-		      (akt[1] == 0xD3 && recvflag))
-		    {
-		      //right sequence number
-		      recvflag = !recvflag;
-		    }
-		  if ((akt[1] & 0x0f) == 0)
-		    {
-		      const uchar reset[1] = { 0xA0 };
-		      CArray *c = new CArray (reset, sizeof (reset));
-		      t->TracePacket (0, this, "RecvReset", *c);
-		      outqueue.put (c);
-		      pth_sem_inc (&out_signal, TRUE);
-		    }
-		}
-	      akt.deletepart (0, 4);
-	    }
-	  else if (akt[0] == 0x68)
-	    {
-	      int len;
-	      uchar c1;
-	      if (akt () < 7)
-		break;
-	      if (akt[1] != akt[2] || akt[3] != 0x68)
-		{
-		  //receive error, try to resume
-		  akt.deletepart (0, 1);
-		  continue;
-		}
-	      if (akt () < akt[1] + 6U)
-		break;
-
-	      c1 = 0;
-	      for (i = 4; i < akt[1] + 4U; i++)
-		c1 += akt[i];
-	      if (akt[akt[1] + 4] != c1 || akt[akt[1] + 5] != 0x16)
-		{
-		  len = akt[1] + 6;
-		  //Forget wrong short frame
-		  akt.deletepart (0, len);
-		  continue;
-		}
-
-	      c1 = 0xE5;
-	      t->TracePacket (0, this, "Send Ack", 1, &c1);
-	      i = write (fd, &c1, 1);
-
-	      if ((akt[4] == 0xF3 && recvflag) ||
-		  (akt[4] == 0xD3 && !recvflag))
-		{
-		  if (CArray (akt.array () + 5, akt[1] - 1) != last)
-		    {
-		      TRACEPRINTF (t, 0, this, "Sequence jump");
-		      recvflag = !recvflag;
-		    }
-		  else
-		    TRACEPRINTF (t, 0, this, "Wrong Sequence");
-		}
-
-	      if ((akt[4] == 0xF3 && !recvflag) ||
-		  (akt[4] == 0xD3 && recvflag))
-		{
-		  recvflag = !recvflag;
-		  CArray *c = new CArray;
-		  len = akt[1] + 6;
-		  c->setpart (akt.array () + 5, 0, len - 7);
-		  last = *c;
-		  outqueue.put (c);
-		  pth_sem_inc (&out_signal, TRUE);
-		}
-              // XXX TODO otherwise set 'len' to what? Or continue?
-	      akt.deletepart (0, len);
-	    }
-	  else
-	    //Forget unknown byte
-	    akt.deletepart (0, 1);
-	}
-
-      if (mode == 1 && pth_event_status (timeout) == PTH_STATUS_OCCURRED)
-	mode = 0;
-
-      if (mode == 0 && !inqueue.isempty ())
-	{
-	  const CArray & c = inqueue.top ();
-	  t->TracePacket (0, this, "Send", c);
-	  repeatcount++;
-	  i = pth_write_ev (fd, c.array (), c (), stop);
-	  if (i == c ())
-	    {
-	      mode = 1;
-	      timeout =
-		pth_event (PTH_EVENT_RTIME | PTH_MODE_REUSE, timeout,
-			   pth_time (0, 100000));
-	    }
-	}
+      ERRORPRINTF (t, E_ERROR | 36, "Send while data");
+      return;
     }
-  pth_event_free (stop, PTH_FREE_THIS);
-  pth_event_free (timeout, PTH_FREE_THIS);
-  pth_event_free (input, PTH_FREE_THIS);
+  if (!raw)
+    {
+      uchar c;
+      unsigned i;
+
+      out.resize (l.size() + 7);
+      out[0] = 0x68;
+      out[1] = l.size() + 1;
+      out[2] = l.size() + 1;
+      out[3] = 0x68;
+      if (sendflag)
+        out[4] = 0x53;
+      else
+        out[4] = 0x73;
+      sendflag = !sendflag;
+
+      out.setpart (l.data(), 5, l.size());
+      c = out[4];
+      for (i = 0; i < l.size(); i++)
+        c += l[i];
+      out[out.size() - 2] = c;
+      out[out.size() - 1] = 0x16;
+    }
+  else
+    {
+      assert (raw == 1);
+      out = l;
+    }
+
+  if (!send_wait)
+    trigger.send();
 }
 
-LowLevelDriver::EMIVer FT12LowLevelDriver::getEMIVer ()
+void
+FT12wrap::recv_Data(CArray &c)
 {
-  return vEMI2;
+  uint8_t *buf = c.data();
+  size_t len = c.size();
+
+  akt.setpart (buf, akt.size(), len);
+  process_read(false);
 }
+
+void
+FT12wrap::timer_cb(ev::timer &w UNUSED, int revents UNUSED)
+{
+  process_read(true);
+}
+
+void
+FT12wrap::do_send_Next()
+{
+  next_free = true;
+  if (akt.size() > 0)
+    {
+      process_read(false);
+      if (!next_free)
+        return;
+    }
+  if (send_wait)
+    {
+      send_wait = false;
+      trigger.send();
+    }
+}
+
+void
+FT12wrap::do__send_Next()
+{
+  out.clear();
+  sendtimer.stop();
+  LowLevelFilter::do_send_Next();
+}
+
+void
+FT12wrap::process_read(bool is_timeout)
+{
+  if (in_reader)
+    return;
+  in_reader = true;
+  timer.stop();
+
+  t->TracePacket (1, "Processing", akt);
+  while (akt.size() > 0 && next_free)
+    {
+      if (akt[0] == 0xE5 && send_wait)
+        {
+          akt.deletepart (0, 1);
+          send_wait = false;
+          do__send_Next();
+          repeatcount = 0;
+        }
+      else if (akt[0] == 0xE5)
+        {
+          TRACEPRINTF (t, 0, "Spurious ACK");
+          akt.deletepart (0, 1);
+        }
+      else if (akt[0] == 0x10)
+        {
+          if (akt.size() < 4)
+            break;
+          if (akt[1] == akt[2] && akt[3] == 0x16)
+            {
+              uchar c1 = 0xE5;
+              iface->send_Data(c1);
+              if ((akt[1] == 0xF3 && !recvflag) ||
+                  (akt[1] == 0xD3 && recvflag))
+                {
+                  //correct sequence number
+                  recvflag = !recvflag;
+                }
+              if ((akt[1] & 0x0f) == 0)
+                {
+                  const uchar reset[1] = { 0xA0 };
+                  CArray c = CArray (reset, sizeof (reset));
+                  t->TracePacket (0, "RecvReset", c);
+                  LowLevelFilter::recv_Data (c);
+                }
+              akt.deletepart (0, 4);
+            }
+          else
+            {
+              akt.deletepart (0, 1);
+            }
+        }
+      else if (akt[0] == 0x68)
+        {
+          int len;
+          uchar c1;
+          if (akt.size() < 7)
+            break;
+          if (akt[1] != akt[2] || akt[3] != 0x68)
+            {
+              akt.deletepart (0, 1);
+              //receive error, try to resume
+              goto err_out;
+            }
+          if (akt.size() < akt[1] + 6U)
+            break;
+
+          c1 = 0;
+          for (unsigned int i = 4; i < akt[1] + 4U; i++)
+            c1 += akt[i];
+          len = akt[1] + 6;
+          if (akt[akt[1] + 4] != c1 || akt[akt[1] + 5] != 0x16)
+            {
+              //Forget wrong short frame
+              akt.deletepart (0, len);
+              continue;
+            }
+
+          c1 = 0xE5;
+          iface->send_Data (c1);
+
+          if (akt[4] == (recvflag ? 0xF3 : 0xD3))
+            { // repeat packet?
+              if (CArray (akt.data() + 5, akt[1] - 1) != last)
+                {
+                  TRACEPRINTF (t, 0, "Sequence jump");
+                  recvflag = !recvflag;
+                }
+              else
+                TRACEPRINTF (t, 0, "Wrong Sequence");
+            }
+          else if (akt[4] == (recvflag ? 0xD3 : 0xF3))
+            {
+              recvflag = !recvflag;
+              CArray *c = new CArray;
+              c->setpart (akt.data() + 5, 0, len - 7);
+              last = *c;
+              LowLevelFilter::recv_Data (*c);
+            }
+          akt.deletepart (0, len);
+        }
+      else
+        {
+          /* if timeout OR an unknown byte, drop it. */
+          if (false)
+            {
+      err_out:
+              if (!is_timeout)
+                break;
+            }
+          akt.deletepart (0, 1);
+        }
+    }
+
+  if (akt.size())
+    {
+      t->TracePacket (1, "Processing: left", akt);
+      timer.start(0.15,0);
+    }
+  in_reader = false;
+}
+
+void
+FT12wrap::sendtimer_cb(ev::timer &w UNUSED, int revents UNUSED)
+{
+  send_wait = false;
+  trigger.send();
+}
+
+void
+FT12wrap::trigger_cb (ev::async &w UNUSED, int revents UNUSED)
+{
+  if (send_wait || !next_free)
+    return;
+  if (out.size() == 0)
+    return;
+
+  repeatcount++;
+  iface->send_Data(out.data(), out.size());
+  send_wait = true;
+  timer.start(0.2, 0);
+}
+
+void FT12wrap::sendReset()
+{
+  const uchar t1[] = { 0x10, 0x40, 0x40, 0x16 };
+  CArray l (t1, sizeof (t1));
+  do_send_Local (l, 1);
+}
+
+
+FT12CEMIDriver::~FT12CEMIDriver()
+{
+}
+
+void
+FT12CEMIDriver::cmdOpen()
+{
+  sendLocal_done_next = N_up;
+  const uchar t1[] = { 0xF6, 0x00, 0x08, 0x01, 0x34, 0x10, 0x01, 0x00 };
+  send_Local (CArray (t1, sizeof (t1)),1);
+}
+
+

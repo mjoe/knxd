@@ -23,34 +23,39 @@
 #ifndef EIB_CEMI_H
 #define EIB_CEMI_H
 
-#include "layer2.h"
-#include "lowlevel.h"
+#include "emi_common.h"
 
 /** CEMI backend */
-class CEMILayer2:public Layer2, private Thread
+class CEMIDriver:public EMI_Common
 {
-  /** driver to send/receive */
-  LowLevelDriver *iface;
-  /** semaphore for inqueue */
-  pth_sem_t in_signal;
-  /** input queue */
-  Queue < LPDU * >inqueue;
-  bool noqueue;
+  void cmdEnterMonitor();
+  void cmdLeaveMonitor();
+  void cmdOpen(); 
+  void cmdClose();
+  void started(); // do sendReset
+  const uint8_t * getIndTypes(); 
+  EMIVer getVersion() { return vCEMI; }
 
-  void Send (LPDU * l);
-  void Run (pth_sem_t * stop);
-  const char *Name() { return "cemi"; }
+  unsigned int maxPacketLen();
+  void sendLocal_done_cb(bool success);
+
+  bool after_reset = false;
+protected:
+  enum { N_bad, N_up, N_down, N_open, N_reset } sendLocal_done_next = N_bad;
+
+private:
+  ev::timer reset_timer;
+  void reset_timer_cb(ev::timer &w, int revents);
+
+  virtual CArray lData2EMI (uchar code, const LDataPtr &p) 
+  { return L_Data_ToCEMI(code, p); }
+  virtual LDataPtr EMI2lData (const CArray & data) 
+  { return CEMI_to_L_Data(data, t); }
+
 public:
-  CEMILayer2 (LowLevelDriver * i, Layer3 * l3, L2options *opt);
-  ~CEMILayer2 ();
-  bool init ();
-
-  void Send_L_Data (LPDU * l);
-
-  bool enterBusmonitor ();
-
-  bool Open ();
-  bool Send_Queue_Empty ();
+  CEMIDriver (LowLevelIface* c, IniSectionPtr& s, LowLevelDriver *i = nullptr);
+  virtual ~CEMIDriver ();
+  void do_send_Next();
 };
 
 #endif  /* EIB_CEMI_H */

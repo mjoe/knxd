@@ -19,22 +19,30 @@
 
 #ifndef DUMMY_H
 #define DUMMY_H
-#include <termios.h>
-#include "lowlatency.h"
-#include "layer2.h"
-#include "lpdu.h"
+#include "link.h"
 
-/** TPUART user mode driver */
-class DummyL2Driver:public Layer2, private Thread
+/** dummy L2 driver, does nothing */
+DRIVER(DummyL2Driver,dummy)
 {
-  void Run (pth_sem_t * stop);
-  const char *Name() { return "Dummy"; }
 public:
-  DummyL2Driver (Layer3 *l3, L2options *opt);
-  ~DummyL2Driver ();
+  DummyL2Driver (const LinkConnectPtr_& c, IniSectionPtr& s) : BusDriver(c,s) {}
+  virtual ~DummyL2Driver ();
 
-  void Send_L_Data (LPDU * l);
+  void send_L_Data (LDataPtr l UNUSED) { send_Next(); }
+  bool setup()
+    {
+      if (!BusDriver::setup())
+        return false;
+      return true;
+    }
+};
 
+/** dummy L2 filter, is transparent */
+FILTER(DummyL2Filter,dummy)
+{
+public:
+  DummyL2Filter (const LinkConnectPtr_& c, IniSectionPtr& s) : Filter(c,s) {}
+  virtual ~DummyL2Filter ();
 };
 
 #endif

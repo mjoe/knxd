@@ -20,32 +20,26 @@
 #ifndef BUSMONITOR_H
 #define BUSMONITOR_H
 
-#include "layer3.h"
+#include "link.h"
+#include "router.h"
 #include "client.h"
+#include "connection.h"
 
 /** implements busmonitor functions for a client */
-class A_Busmonitor:public L_Busmonitor_CallBack, private Thread
+class A_Busmonitor:public L_Busmonitor_CallBack, public A__Base
 {
-  /** semaphore for the input queue */
-  pth_sem_t sem;
-  /** input queue */
-  Queue < L_Busmonitor_PDU * >data;
   /** is virtual busmonitor */
   bool v;
   /** should provide timestamps */
   bool ts;
+  /** registered? */
+  bool running = false;
 
-  void Run (pth_sem_t * stop);
-  const char *Name() { return "busmonitor"; }
 protected:
   /** Layer 3 Interface*/
-  Layer3 * l3;
-  /** client connection */
-  ClientConnection *con;
+  Router& router;
   /** debug output */
-  Trace *t;
-  /** turns a busmonitor LPDU into a eibd packet and sends it */
-  virtual int sendResponse (L_Busmonitor_PDU * p, pth_event_t stop);
+  TracePtr t;
 public:
   /** initializes busmonitor
    * @param c client connection
@@ -54,20 +48,21 @@ public:
    * @param virt is virtual busmonitor
    * @param ts provide timestamps
    */
-  A_Busmonitor (ClientConnection * c, Layer3 * l3, Trace * tr, bool virt =
-                false, bool ts = false);
+  A_Busmonitor (ClientConnPtr c,
+                bool virt, bool ts);
   virtual ~A_Busmonitor ();
-  void Send_L_Busmonitor (L_Busmonitor_PDU * l);
+  bool setup(uint8_t *buf,size_t len);
+  void start();
+  void stop();
 
-  /** start processing */
-  void Do (pth_event_t stop);
+  void send_L_Busmonitor (LBusmonPtr l);
+  // dummy method
+  void recv_Data(uint8_t *buf UNUSED, size_t len UNUSED) {}
 };
 
 /** implements text busmonitor functions for a client */
 class A_Text_Busmonitor:public A_Busmonitor
 {
-protected:
-  int sendResponse (L_Busmonitor_PDU * p, pth_event_t stop);
 public:
   /** initializes busmonitor
    * @param c client connection
@@ -75,11 +70,12 @@ public:
    * @param l3 Layer 3
    * @param virt is virtual busmonitor
    */
-  A_Text_Busmonitor (ClientConnection * c, Layer3 * l3, Trace * tr, bool virt = 0):A_Busmonitor (c, l3, tr,
-		virt,
-		false)
+  A_Text_Busmonitor (ClientConnPtr c, bool virt)
+                   : A_Busmonitor (c, virt, false)
   {
+    t->setAuxName("TBusMon");
   }
+  void send_L_Busmonitor (LBusmonPtr l);
 };
 
 #endif

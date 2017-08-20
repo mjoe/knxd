@@ -22,57 +22,100 @@
 
 #include <termios.h>
 
-#include "threads.h"
+#include "iobuf.h"
 #include "lowlevel.h"
+#include "emi_common.h"
 #include "lowlatency.h"
+#include "link.h"
+#include "cemi.h"
+
+/** FT12-specific CEMI backend (separate commands for setup) */
+class FT12CEMIDriver : public CEMIDriver
+{
+  void cmdOpen(); 
+public:
+  FT12CEMIDriver (LowLevelIface* c, IniSectionPtr& s, LowLevelDriver * i = nullptr) : CEMIDriver(c,s,i)
+    {
+      t->setAuxName("ft12cemi");
+    }
+  virtual ~FT12CEMIDriver ();
+};
 
 /** FT1.2 lowlevel driver*/
-class FT12LowLevelDriver:public LowLevelDriver, private Thread
+DRIVER_(FT12Driver,LowLevelAdapter,ft12)
 {
-  /** old serial config */
-  low_latency_save sold;
-  /** file descriptor */
-  int fd;
-  /** saved termios */
-  struct termios old;
-  /** send state */
-  int sendflag;
-  /** recevie state */
-  int recvflag;
-  /** debug output */
-  Trace *t;
-  /** semaphore for inqueue */
-  pth_sem_t in_signal;
-  /** semaphore for outqueue */
-  pth_sem_t out_signal;
-  /** input queue */
-  Queue < CArray > inqueue;
-  /** output queue */
-  Queue < CArray * >outqueue;
+public:
+  FT12Driver(const LinkConnectPtr_& c, IniSectionPtr& s) : LowLevelAdapter(c,s)
+    {
+      t->setAuxName("ft12dr");
+    }
+  virtual ~FT12Driver();
+
+  bool setup();
+  virtual EMIVer getVersion() { return vEMI2; }
+private:
+  bool make_EMI();
+};
+
+DRIVER_(FT12cemiDriver, FT12Driver, ft12cemi)
+{
+public:
+  FT12cemiDriver(const LinkConnectPtr_& c, IniSectionPtr& s) : FT12Driver(c,s)
+    {
+      t->setAuxName("ft12drc");
+    }
+  virtual ~FT12cemiDriver();
+
+  virtual EMIVer getVersion() { return vCEMI; }
+};
+
+class FT12wrap : public LowLevelFilter
+{
+  /** send msg sequence 1-bit counter */
+  bool sendflag;
+  /** receive msg sequence 1-bit counter */
+  bool recvflag;
+
+  /** packet send buffer */
+  CArray out;
   /** frame in receiving */
   CArray akt;
+  /** last received frame */
+  CArray last;
   /** repeatcount of the transmitting frame */
   int repeatcount;
-  /** state */
-  int mode;
-  /** event for waiting on outqueue */
-  pth_event_t getwait;
-  /** semaphore to signal that inqueu is empty */
-  pth_sem_t send_empty;
 
-  void Run (pth_sem_t * stop);
-  const char *Name() { return "ft12"; }
+  /** waiting for ACK */
+  bool send_wait;
+  /** send_Next received */
+  bool next_free = true;
+  /** protect against recursive call of process_read() */
+  bool in_reader = false;
+
+  /** set up send and recv buffers, timers, etc. */
+  void setup_buffers();
+
+  ev::async trigger; void trigger_cb (ev::async &w, int revents);
+  ev::timer timer; void timer_cb (ev::timer &w, int revents);
+  ev::timer sendtimer; void sendtimer_cb (ev::timer &w, int revents);
+  /** process incoming data */
+  void process_read (bool is_timeout);
+  void do_send_Next ();
+  void do__send_Next ();
+  void stop_ ();
+
 public:
-  FT12LowLevelDriver (const char *device, Trace * tr);
-  ~FT12LowLevelDriver ();
-  bool init ();
+  FT12wrap (LowLevelIface* c, IniSectionPtr& s, LowLevelDriver *i = nullptr);
+  virtual ~FT12wrap ();
+  bool setup ();
+  void start ();
+  void stop ();
 
-  void Send_Packet (CArray l);
-  bool Send_Queue_Empty ();
-  pth_sem_t *Send_Queue_Empty_Cond ();
-  CArray *Get_Packet (pth_event_t stop);
-  void SendReset ();
-  EMIVer getEMIVer ();
+  void recv_Data (CArray &c);
+  void send_Data (CArray& l);
+  void do_send_Local (CArray& l, int raw = 0);
+
+  void sendReset();
 };
 
 #endif

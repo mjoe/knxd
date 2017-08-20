@@ -1,26 +1,27 @@
 AUTOMAKE_OPTIONS=1.9
 ACLOCAL_AMFLAGS = -I m4
-EXTRA_DIST=SubmittingPatches .gitignore
+EXTRA_DIST=SubmittingPatches .gitignore tools/version.sh
+
+CONFIGURE_DEPENDENCIES=debian/changelog
+## rebuild when the version changes
 
 BUILDDIRS = 
 
 SUBDIRS=. src systemd
-DIST_SUBDIRS    = $(SUBDIRS) rpm
+DIST_SUBDIRS    = $(SUBDIRS)
 
-BUILT_SOURCES=path.h
-CLEANFILES=path.h
+BUILT_SOURCES=path.h version.h
+CLEANFILES=path.h version.h
 
 path.h : Makefile
 	echo "#define PKGDATADIR \"${pkgdatadir}\"" >$@
 	echo "#define PKGLIBDIR \"${pkglibdir}\"" >>$@
 
-# source and binary RPMs
-#
-.PHONY:	RPM
-RPM:	all dist
-	rm -f rpm/rpm-tmp.*
-	make -C rpm $@
-
+.PHONY:	CHECK
+version.h: CHECK
+	echo "#define REAL_VERSION \"${shell tools/version.sh}\"" >>$@.new
+	cmp -s $@.new $@ && rm $@.new || mv $@.new $@
+	
 
 .PHONY: help HELP
 help HELP:
@@ -30,9 +31,12 @@ help HELP:
 	@echo "the following make targets may be supported (at this level):"
 	@echo ""
 	@echo "    make help    - print this text"
-	@echo "    make RPM     - create (source and binary) RPMs"
-	@echo ""
-	@echo "NOTE: The RPM target may fail because it requires" 
-	@echo "additional tools that may not be present on your machine."
 	@echo ""
 
+# update version number
+configure: debian/changelog
+config.h: configure
+
+test: all
+	sh tools/test.sh
+	tools/test_inih tools/test.ini tools/bad*.ini

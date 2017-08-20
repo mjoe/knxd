@@ -19,261 +19,125 @@
 
 #include "emi2.h"
 #include "emi.h"
-#include "layer3.h"
 
-bool
-EMI2Layer2::addAddress (eibaddr_t addr UNUSED)
+EMI2Driver::EMI2Driver (LowLevelIface* c, IniSectionPtr& s, LowLevelDriver *i) : EMI_Common(c,s,i)
 {
-  return false;
+  t->setAuxName("EMI2");
+  sendLocal_done.set<EMI2Driver,&EMI2Driver::sendLocal_done_cb>(this);
 }
 
-bool
-EMI2Layer2::removeAddress (eibaddr_t addr UNUSED)
+EMI2Driver::~EMI2Driver()
 {
-  return false;
 }
 
-EMI2Layer2::EMI2Layer2 (LowLevelDriver * i, Layer3 * l3,
-                        L2options *opt) : Layer2 (l3, opt)
+void
+EMI2Driver::sendLocal_done_cb(bool success)
 {
-  TRACEPRINTF (t, 2, this, "Open");
-  iface = i;
-  noqueue = opt ? (opt->flags & FLAG_B_EMI_NOQUEUE) : false;
-  if (opt->flags)
-    opt->flags &=~ FLAG_B_EMI_NOQUEUE;
-  pth_sem_init (&in_signal);
-  if (!iface->init ())
+  if (!success || sendLocal_done_next == N_bad)
     {
-      delete iface;
-      iface = 0;
+      errored();
+      LowLevelFilter::stopped();
+    }
+  else if (sendLocal_done_next == N_down)
+    LowLevelFilter::stop();
+  else if (sendLocal_done_next == N_up)
+    LowLevelFilter::started();
+  else if (sendLocal_done_next == N_open)
+    {
+      sendLocal_done_next = N_up;
+      const uchar t2[] = { 0xa9, 0x00, 0x18, 0x34, 0x56, 0x78, 0x0a };
+      send_Local (CArray (t2, sizeof (t2)),1);
+    }
+  else if (sendLocal_done_next == N_enter)
+    {
+      sendLocal_done_next = N_up;
+      const uchar t2[] = { 0xa9, 0x90, 0x18, 0x34, 0x45, 0x67, 0x8a };
+      send_Local (CArray (t2, sizeof (t2)),1);
+    }
+
+}
+
+void
+EMI2Driver::cmdEnterMonitor ()
+{
+  sendLocal_done_next = N_enter;
+  const uchar t1[] = { 0xa9, 0x1E, 0x12, 0x34, 0x56, 0x78, 0x9a };
+  send_Local (CArray (t1, sizeof (t1)),1);
+}
+
+void
+EMI2Driver::cmdLeaveMonitor ()
+{
+  if (wait_confirm_low)
+    {
+      sendLocal_done_next = N_want_leave;
       return;
     }
-  Start ();
-  TRACEPRINTF (t, 2, this, "Opened");
-}
-
-bool
-EMI2Layer2::init ()
-{
-  if (! layer2_is_bus())
-    return false;
-  return iface != 0;
-}
-
-EMI2Layer2::~EMI2Layer2 ()
-{
-  TRACEPRINTF (t, 2, this, "Destroy");
-  Stop ();
-  while (!inqueue.isempty ())
-    delete inqueue.get ();
-  if (iface)
-    delete iface;
-}
-
-bool
-EMI2Layer2::enterBusmonitor ()
-{
-  if (!Layer2::enterBusmonitor ())
-    return false;
-  const uchar t1[] = { 0xa9, 0x1E, 0x12, 0x34, 0x56, 0x78, 0x9a };
-  const uchar t2[] = { 0xa9, 0x90, 0x18, 0x34, 0x45, 0x67, 0x8a };
-  TRACEPRINTF (t, 2, this, "OpenBusmon");
-  iface->SendReset ();
-  iface->Send_Packet (CArray (t1, sizeof (t1)));
-  iface->Send_Packet (CArray (t2, sizeof (t2)));
-
-  if (!iface->Send_Queue_Empty ())
-    {
-      pth_event_t
-	e = pth_event (PTH_EVENT_SEM, iface->Send_Queue_Empty_Cond ());
-      pth_wait (e);
-      pth_event_free (e, PTH_FREE_THIS);
-    }
-  return true;
-}
-
-bool
-EMI2Layer2::leaveBusmonitor ()
-{
-  if (!Layer2::leaveBusmonitor ())
-    return false;
-  TRACEPRINTF (t, 2, this, "CloseBusmon");
+  sendLocal_done_next = N_down;
   uchar t[] = { 0xa9, 0x1E, 0x12, 0x34, 0x56, 0x78, 0x9a };
-  iface->Send_Packet (CArray (t, sizeof (t)));
-  while (!iface->Send_Queue_Empty ())
-    {
-      pth_event_t
-	e = pth_event (PTH_EVENT_SEM, iface->Send_Queue_Empty_Cond ());
-      pth_wait (e);
-      pth_event_free (e, PTH_FREE_THIS);
-    }
-  return true;
+  send_Local (CArray (t, sizeof (t)),1);
 }
-
-bool
-EMI2Layer2::Open ()
-{
-  if (!Layer2::Open ())
-    return false;
-  const uchar t1[] = { 0xa9, 0x1E, 0x12, 0x34, 0x56, 0x78, 0x9a };
-  const uchar t2[] = { 0xa9, 0x00, 0x18, 0x34, 0x56, 0x78, 0x0a };
-  TRACEPRINTF (t, 2, this, "OpenL2");
-  iface->SendReset ();
-  iface->Send_Packet (CArray (t1, sizeof (t1)));
-  iface->Send_Packet (CArray (t2, sizeof (t2)));
-
-  while (!iface->Send_Queue_Empty ())
-    {
-      pth_event_t
-	e = pth_event (PTH_EVENT_SEM, iface->Send_Queue_Empty_Cond ());
-      pth_wait (e);
-      pth_event_free (e, PTH_FREE_THIS);
-    }
-  return true;
-}
-
-bool
-EMI2Layer2::Close ()
-{
-  if (!Layer2::Close ())
-    return false;
-  TRACEPRINTF (t, 2, this, "CloseL2");
-  uchar t[] = { 0xa9, 0x1E, 0x12, 0x34, 0x56, 0x78, 0x9a };
-  iface->Send_Packet (CArray (t, sizeof (t)));
-  if (!iface->Send_Queue_Empty ())
-    {
-      pth_event_t
-	e = pth_event (PTH_EVENT_SEM, iface->Send_Queue_Empty_Cond ());
-      pth_wait (e);
-      pth_event_free (e, PTH_FREE_THIS);
-    }
-  return true;
-}
-
-bool
-EMI2Layer2::Send_Queue_Empty ()
-{
-  return iface->Send_Queue_Empty () && inqueue.isempty();
-}
-
 
 void
-EMI2Layer2::Send_L_Data (LPDU * l)
+EMI2Driver::cmdOpen ()
 {
-  TRACEPRINTF (t, 2, this, "Send %s", l->Decode ()());
-  if (l->getType () != L_Data)
+  sendLocal_done_next = N_open;
+  const uchar t1[] = { 0xa9, 0x1E, 0x12, 0x34, 0x56, 0x78, 0x9a };
+  send_Local (CArray (t1, sizeof (t1)),1);
+}
+
+void
+EMI2Driver::cmdClose ()
+{
+  if (wait_confirm_low)
     {
-      delete l;
+      sendLocal_done_next = N_want_close;
       return;
     }
-  L_Data_PDU *l1 = (L_Data_PDU *) l;
-  assert (l1->data () >= 1);
-  /* discard long frames, as they are not supported by EMI 2 */
-  if (l1->data () > 0x10)
-    return;
-  assert (l1->data () <= 0x10);
-  assert ((l1->hopcount & 0xf8) == 0);
-
-  inqueue.put (l);
-  pth_sem_inc (&in_signal, 1);
+  sendLocal_done_next = N_down;
+  uchar t[] = { 0xa9, 0x1E, 0x12, 0x34, 0x56, 0x78, 0x9a };
+  send_Local (CArray (t, sizeof (t)),1);
 }
 
-void
-EMI2Layer2::Send (LPDU * l)
+void EMI2Driver::started()
 {
-  TRACEPRINTF (t, 1, this, "Send %s", l->Decode ()());
-  L_Data_PDU *l1 = (L_Data_PDU *) l;
-
-  CArray pdu = L_Data_ToEMI (0x11, *l1);
-  iface->Send_Packet (pdu);
-  if (mode == BUSMODE_VMONITOR)
-    {
-      L_Busmonitor_PDU *l2 = new L_Busmonitor_PDU (this);
-      l2->pdu.set (l->ToPacket ());
-      l3->recv_L_Data (l2);
-    }
-  delete l;
+  reset_ack_wait = true;
+  reset_timer.start(0.5, 0);
+  sendReset();
 }
 
-void
-EMI2Layer2::Run (pth_sem_t * stop1)
+void EMI2Driver::reset_timer_cb(ev::timer& w, int revents)
 {
-  pth_event_t stop = pth_event (PTH_EVENT_SEM, stop1);
-  pth_event_t input = pth_event (PTH_EVENT_SEM, &in_signal);
-  pth_event_t timeout = pth_event (PTH_EVENT_RTIME, pth_time (0, 0));
-  bool wait_confirm = false;
-  while (pth_event_status (stop) != PTH_STATUS_OCCURRED)
-    {
-      if (!wait_confirm)
-	pth_event_concat (stop, input, NULL);
-      if (wait_confirm)
-	pth_event_concat (stop, timeout, NULL);
-      CArray *c = iface->Get_Packet (stop);
-      pth_event_isolate(input);
-      pth_event_isolate(timeout);
-      if (!wait_confirm && !inqueue.isempty())
-	{
-	  Send(inqueue.get());
-	  if (noqueue)
-	    {
-	      pth_event (PTH_EVENT_RTIME | PTH_MODE_REUSE, timeout,
-			 pth_time (1, 0));
-	      wait_confirm = true;
-	    }
-	}
-      if (wait_confirm && pth_event_status(timeout) == PTH_STATUS_OCCURRED)
-	wait_confirm = false;
-      if (!c)
-	continue;
-      if (c->len () == 1 && (*c)[0] == 0xA0 && (mode & BUSMODE_UP))
-	{
-	  TRACEPRINTF (t, 2, this, "Reopen");
-          busmode_t old_mode = mode;
-	  mode = BUSMODE_DOWN;
-	  if (Open ())
-            mode = old_mode;
-	}
-      if (c->len () == 1 && (*c)[0] == 0xA0 && mode == BUSMODE_MONITOR)
-	{
-	  TRACEPRINTF (t, 2, this, "Reopen Busmonitor");
-	  mode = BUSMODE_DOWN;
-	  enterBusmonitor ();
-	}
-      if (c->len () && (*c)[0] == 0x2E)
-	wait_confirm = false;
-      if (c->len () && (*c)[0] == 0x29 && (mode & BUSMODE_UP))
-	{
-	  L_Data_PDU *p = EMI_to_L_Data (*c, this);
-	  if (p)
-	    {
-	      delete c;
-	      if (p->AddrType == IndividualAddress)
-		p->dest = 0;
-	      TRACEPRINTF (t, 2, this, "Recv %s", p->Decode ()());
-	      if (mode == BUSMODE_VMONITOR)
-		{
-		  L_Busmonitor_PDU *l2 = new L_Busmonitor_PDU (this);
-		  l2->pdu.set (p->ToPacket ());
-		  l3->recv_L_Data (l2);
-		}
-	      l3->recv_L_Data (p);
-	      continue;
-	    }
-	}
-      if (c->len () > 4 && (*c)[0] == 0x2B && mode == BUSMODE_MONITOR)
-	{
-	  L_Busmonitor_PDU *p = new L_Busmonitor_PDU (this);
-	  p->status = (*c)[1];
-	  p->timestamp = ((*c)[2] << 24) | ((*c)[3] << 16);
-	  p->pdu.set (c->array () + 4, c->len () - 4);
-	  delete c;
-	  TRACEPRINTF (t, 2, this, "Recv %s", p->Decode ()());
-	  l3->recv_L_Data (p);
-	  continue;
-	}
-      delete c;
-    }
-  pth_event_free (stop, PTH_FREE_THIS);
-  pth_event_free (input, PTH_FREE_THIS);
-  pth_event_free (timeout, PTH_FREE_THIS);
+  ERRORPRINTF(t, E_ERROR, "reset timed out");
+  errored();
 }
+
+void EMI2Driver::do_send_Next()
+{
+  if (reset_ack_wait)
+    {
+      reset_ack_wait = false;
+      reset_timer.stop();
+      EMI_Common::started();
+    }
+  else if (sendLocal_done_next == N_want_close)
+    {
+      wait_confirm_low = false;
+      cmdClose();
+    }
+  else if (sendLocal_done_next == N_want_leave)
+    {
+      wait_confirm_low = false;
+      cmdLeaveMonitor();
+    }
+  else
+    EMI_Common::do_send_Next();
+}
+
+const uint8_t *
+EMI2Driver::getIndTypes()
+{
+    static const uint8_t indTypes[] = { 0x2E, 0x29, 0x2B };
+    return indTypes;
+}   
+

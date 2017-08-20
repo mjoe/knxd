@@ -21,45 +21,49 @@
 #define SERVER_H
 
 #include "common.h"
-#include "layer3.h"
+#include "link.h"
+#include "router.h"
 
 class ClientConnection;
+typedef std::shared_ptr<ClientConnection> ClientConnPtr;
 
 /** implements the frontend (but opens no connection) */
-class BaseServer:protected Thread, public Layer2virtual
+class NetServer: public Server
 {
-  virtual void Run (pth_sem_t * stop) = 0;
-  const char *Name() { return "baseserver"; }
+  friend class ClientConnection;
 protected:
-  BaseServer (Layer3 * l3, Trace * tr);
+  NetServer (BaseRouter& l3, IniSectionPtr& s);
 public:
-  virtual ~BaseServer ();
+  virtual ~NetServer ();
+  bool ignore_when_systemd = false;
 
-  virtual bool init ();
-};
+private:
+  ev::io io; void io_cb (ev::io &w, int revents);
 
-/** implements the frontend (but opens no connection) */
-class Server:public BaseServer
-{
   /** open client connections*/
-  Array < ClientConnection * >connections;
+  Array < ClientConnPtr > connections;
 
-  void Run (pth_sem_t * stop);
-  const char *Name() { return "server"; }
+  ev::async cleanup;
+  void cleanup_cb (ev::async &w, int revents);
+
+  /** to-be-closed client connections*/
+  Queue < ClientConnPtr > cleanup_q;
+  void stop_();
+
 protected:
   /** server socket */
   int fd;
 
   virtual void setupConnection (int cfd);
 
-  Server (Layer3 * l3, Trace * tr);
-public:
-  virtual ~Server ();
-
-  virtual bool init ();
+  bool setup();
+  void start();
+  void stop();
 
   /** deregister client connection */
-  bool deregister (ClientConnection * con);
+  void deregister (ClientConnPtr con);
 };
+
+typedef std::shared_ptr<NetServer> NetServerPtr;
 
 #endif

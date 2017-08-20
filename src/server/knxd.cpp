@@ -26,132 +26,48 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
-#include "layer3.h"
-#include "layer2.h"
-#include "localserver.h"
-#include "inetserver.h"
-#include "eibnetserver.h"
-#include "groupcacheclient.h"
+#include <ev++.h>
+#include "router.h"
+#include "version.h"
+#include "link.h"
 
 #ifdef HAVE_SYSTEMD
 #include <systemd/sd-daemon.h>
-#include "systemdserver.h"
 #endif
 
-#define OPT_BACK_TUNNEL_NOQUEUE 1
-#define OPT_BACK_TPUARTS_ACKGROUP 2
-#define OPT_BACK_TPUARTS_ACKINDIVIDUAL 3
-#define OPT_BACK_TPUARTS_DISCH_RESET 4
-#define OPT_BACK_EMI_NOQUEUE 5
-#define OPT_STOP_NOW 6
-#define OPT_FORCE_BROADCAST 7
+// option values
+bool stop_now = false;
+bool do_list = false;
+bool background = false;
+bool stopping = false;
+const char *pidfile = NULL;
+const char *logfile = NULL;
+const char *cfgfile = NULL;
+const char *mainsection = NULL;
+char *const *argv;
 
-/** structure to store the arguments */
-class arguments
+LOOP_RESULT loop;
+
+void usage()
 {
-public:
-  /** port to listen */
-  int port;
-  /** path for unix domain socket */
-  const char *name;
-  /** path to pid file */
-  const char *pidfile;
-  /** path to trace log file */
-  const char *daemon;
-  /** trace level */
-  int tracelevel;
-  /** error level */
-  int errorlevel;
-  /** EIB address (for some backends) */
-  eibaddr_t addr;
+  fprintf(stderr,"Usage: knxd configfile [main_section]\n");
+  fprintf(stderr,"Please consult /usr/share/doc/knxd/inifile.rst\n");
 
-  /** do I have enough to do? */
-  unsigned int has_work;
+  if (pidfile)
+    unlink (pidfile);
 
-  /* EIBnet/IP multicast server flags */
-  bool tunnel;
-  bool route;
-  bool discover;
+  exit (2);
+}
 
-  L2options l2opts;
-  const char *serverip;
-  const char *eibnetname;
+// The NOQUEUE options are deprecated
+#define OPT_STOP_NOW 1
 
-  bool stop_now;
-  bool force_broadcast;
-private:
-  /** our L3 instance (singleton (so far!)) */
-  Layer3 *layer3;
-  /** The current tracer */
-  Trace *t;
-  bool trace_used;
-
-public:
-  arguments () {
-    addr = 0x0001;
-  }
-  ~arguments () {
-  }
-
-  /** get the L3 instance */
-  Layer3 *l3()
-    {
-      if (layer3 == 0) 
-        {
-          layer3 = new Layer3 (addr, tracer(), force_broadcast);
-          addr = 0;
-        }
-      return layer3;
-    }
-  bool has_l3() 
-    {
-      return layer3 != NULL;
-    }
-  void free_l3() 
-    {
-      delete layer3;
-    }
-    
-  /** get the current tracer.
-   * Call with 'true' when you want to change the tracer
-   * and with 'false' when you want to use it.
-   *
-   * If the current tracer has been used, it's not modified; instead, it is
-   * passed to Layer3 (which will deallocate it when it ends) and copied to
-   * a new instance.
-   */
-  Trace *tracer(bool modify = false)
-    {
-      if (modify && trace_used)
-        {
-          Trace *tr = new Trace(*t);
-          l3()->registerTracer(t);
-          t = tr;
-          trace_used = false;
-        }
-      else if (! t)
-        {
-          t = new Trace();
-          trace_used = !modify;
-
-          t->SetErrorLevel (LEVEL_WARNING); // default
-        }
-      else if (!modify)
-        trace_used = true;
-      return t;
-    }
-  void finish_l3 ()
-    {
-      if (trace_used)
-        l3()->registerTracer(t);
-      else if (t)
-        delete t;
-      t = NULL;
-    }
-};
-
-/** storage for the arguments*/
-arguments arg;
+/** number of file descriptors passed in by systemd */
+#ifdef HAVE_SYSTEMD
+int num_fds;
+#else
+const int num_fds = 0;
+#endif
 
 /** aborts program with a printf like message */
 void
@@ -161,377 +77,285 @@ die (const char *msg, ...)
   int err = errno;
 
   va_start (ap, msg);
-  vprintf (msg, ap);
+  vfprintf (stderr, msg, ap);
   if (err)
-    printf (": %s\n", strerror(err));
+    fprintf (stderr, ": %s\n", strerror(err));
   else
-    printf ("\n");
+    fprintf (stderr, "\n");
   va_end (ap);
 
-  if (arg.pidfile)
-    unlink (arg.pidfile);
+  if (pidfile)
+    unlink (pidfile);
 
   exit (1);
 }
 
-
-#include "layer2conf.h"
-
-/** structure to store layer 2 backends */
-struct urldef
-{
-  /** URL-prefix */
-  const char *prefix;
-  /** factory function */
-  Layer2_Create_Func Create;
-};
-
-/** list of URLs */
-struct urldef URLs[] = {
-#undef L2_NAME
-#define L2_NAME(a) { a##_PREFIX, a##_CREATE },
-#include "layer2create.h"
-  {0, 0}
-};
-
-/** determines the right backend for the url and creates it */
-Layer2 *
-Create (const char *url, L2options *opt, Layer3 * l3)
-{
-  unsigned int p = 0;
-  struct urldef *u = URLs;
-  while (url[p] && url[p] != ':')
-    p++;
-  if (url[p] != ':')
-    die ("not a valid url");
-  while (u->prefix)
-    {
-      if (strlen (u->prefix) == p && !memcmp (u->prefix, url, p))
-        return u->Create (url + p + 1, opt, l3);
-      u++;
-    }
-  die ("url not supported");
-  return 0;
-}
-
-/** parses an EIB individual address */
-eibaddr_t
-readaddr (const char *addr)
-{
-  int a, b, c;
-  sscanf (addr, "%d.%d.%d", &a, &b, &c);
-  return ((a & 0x0f) << 12) | ((b & 0x0f) << 8) | ((c & 0xff));
-}
-
 /** version */
-const char *argp_program_version = "knxd " VERSION;
+const char *argp_program_version = "knxd " REAL_VERSION;
 /** documentation */
 static char doc[] =
   "knxd -- a commonication stack for EIB/KNX\n"
   "(C) 2005-2015 Martin Koegler <mkoegler@auto.tuwien.ac.at> et al.\n"
-  "Supported Layer-2 URLs are:\n"
-#undef L2_NAME
-#define L2_NAME(a) a##_URL
-#include "layer2create.h"
+  "(C) 2016-2017 Matthias Urlichs <matthias@urlichs.de>\n"
   "\n"
-#undef L2_NAME
-#define L2_NAME(a) a##_DOC
-#include "layer2create.h"
-  "Arguments are processed in order.\n"
-  "Modifiers affect the device mentioned afterwards.\n"
+  "Usage: knxd configfile [main-section]\n"
+  "\n"
+  "Please read the documentation for details.\n"
   ;
-
-/** documentation for arguments*/
-static char args_doc[] = "URL";
 
 /** option list */
 static struct argp_option options[] = {
-  {"listen-tcp", 'i', "PORT", OPTION_ARG_OPTIONAL,
-   "listen at TCP port PORT (default 6720)"},
-  {"listen-local", 'u', "FILE", OPTION_ARG_OPTIONAL,
-   "listen at Unix domain socket FILE (default /tmp/eib)"},
-  {"trace", 't', "MASK", 0,
-   "set trace flags (bitmask)"},
-  {"error", 'f', "LEVEL", 0,
-   "set error level"},
-  {"eibaddr", 'e', "EIBADDR", 0,
-   "set our EIB address to EIBADDR (default 0.0.1)"},
-  {"pid-file", 'p', "FILE", 0,
-   "write the PID of the process to FILE"},
-  {"daemon", 'd', "FILE", OPTION_ARG_OPTIONAL,
-   "start the programm as daemon. Output will be written to FILE if given"},
-#ifdef HAVE_EIBNETIPSERVER
-  {"Tunnelling", 'T', 0, 0,
-   "enable EIBnet/IP Tunneling in the EIBnet/IP server"},
-  {"Routing", 'R', 0, 0,
-   "enable EIBnet/IP Routing in the EIBnet/IP server"},
-  {"Discovery", 'D', 0, 0,
-   "enable the EIBnet/IP server to answer discovery and description requests (SEARCH, DESCRIPTION)"},
-  {"Server", 'S', "ip[:port]", OPTION_ARG_OPTIONAL,
-   "starts an EIBnet/IP multicast server"},
-  {"Name", 'n', "SERVERNAME", 0,
-   "name of the EIBnet/IP server (default is 'knxd')"},
-#endif
-  {"layer2", 'b', "driver:[arg]", 0,
-   "a Layer-2 driver to use (knxd supports more than one)"},
-#ifdef HAVE_GROUPCACHE
-  {"GroupCache", 'c', 0, 0,
-   "enable caching of group communication network state"},
-#endif
-#ifdef HAVE_EIBNETIPTUNNEL
-  {"no-tunnel-client-queuing", OPT_BACK_TUNNEL_NOQUEUE, 0, 0,
-   "do not assume KNXnet/IP Tunneling bus interface can handle parallel cEMI requests"},
-#endif
-#ifdef HAVE_TPUARTs
-  {"tpuarts-ack-all-group", OPT_BACK_TPUARTS_ACKGROUP, 0, 0,
-   "tpuarts backend should generate L2 acks for all group telegrams"},
-  {"tpuarts-ack-all-individual", OPT_BACK_TPUARTS_ACKINDIVIDUAL, 0, 0,
-   "tpuarts backend should generate L2 acks for all individual telegrams"},
-  {"tpuarts-disch-reset", OPT_BACK_TPUARTS_DISCH_RESET, 0, 0,
-   "tpuarts backend should should use a full interface reset (for Disch TPUART interfaces)"},
-#endif
-  {"no-emi-send-queuing", OPT_BACK_EMI_NOQUEUE, 0, 0,
-   "wait for L_Data_ind while sending (for all EMI based backends)"},
-  {"no-monitor", 'N', 0, 0,
-   "the next Layer2 interface may not enter monitor mode"},
-  {"allow-forced-broadcast", OPT_FORCE_BROADCAST, 0, 0,
-   "Treat routing counter 7 as per KNX spec (dangerous)"},
-  {"stop-right-now", OPT_STOP_NOW, 0, OPTION_HIDDEN,
+  {"stop", OPT_STOP_NOW, 0, OPTION_HIDDEN,
    "immediately stops the server after a successful start"},
+  {"list", 'l', 0, 0,
+   "list known drivers, filters, or servers"},
   {0}
 };
 
+void fork_args_helper()
+{
+  int fifo[2];
+  if (pipe(fifo) == -1)
+    die("pipe");
+  pid_t pid = fork();
+  if (pid == -1)
+    die("could not fork");
+  if (pid == 0)
+    {
+      close(fifo[0]);
+      dup2(fifo[1],1);
+      close(fifo[1]);
+
+      char *s = (char *)malloc(strlen(argv[0])+7);
+      sprintf(s,"%s_args",argv[0]);
+      execvp(s, argv);
+
+      execv(LIBEXECDIR "/knxd_args", argv);
+
+      die("could not exec knxd_args helper");
+      exit(1);
+    }
+  close(fifo[1]);
+  dup2(fifo[0],0);
+  close(fifo[0]);
+  cfgfile = "-";
+  mainsection = "main";
+}
+
 /** parses and stores an option */
 static error_t
-parse_opt (int key, char *arg, struct argp_state *state)
+parse_opt (int key, char *arg, struct argp_state *state UNUSED)
 {
-  struct arguments *arguments = (struct arguments *) state->input;
   switch (key)
     {
-    case 'T':
-      arguments->tunnel = 1;
-      arguments->has_work++;
-      break;
-    case 'R':
-      arguments->route = 1;
-      arguments->has_work++;
-      break;
-    case 'D':
-      arguments->discover = 1;
-      break;
-    case 'S':
-      {
-        const char *serverip;
-        const char *name = arguments->eibnetname;
-
-        EIBnetServer *c;
-        int port = 0;
-        char *a = strdup (arg ? arg : "");
-        char *b;
-        if (!a)
-          die ("out of memory");
-        b = strchr (a, ':');
-        if (b)
-          {
-            *b++ = 0;
-            port = atoi (b);
-          }
-        if (port <= 0)
-          port = 3671;
-        serverip = a;
-        if (!*serverip) 
-          serverip = "224.0.23.12";
-
-        c = new EIBnetServer (serverip, port, arguments->tunnel, arguments->route, arguments->discover,
-                              arguments->l3(), arguments->tracer(),
-                              (name && *name) ? name : "knxd");
-        if (!c->init ())
-          die ("initialization of the EIBnet/IP server failed");
-        free (a);
-        arguments->tunnel = false;
-        arguments->route = false;
-        arguments->discover = false;
-        arguments->eibnetname = 0;
-      }
-      break;
-    case 'u':
-      {
-        BaseServer *s;
-        const char *name = "";
-        if (arg)
-          name = arg;
-        if (!*name)
-          name = "/tmp/eib";
-        s = new LocalServer (arguments->l3(), arguments->tracer(), name);
-        if (!s->init ())
-          die ("initialisation of the knxd unix protocol failed");
-        arguments->has_work++;
-      }
-      break;
-    case 'i':
-      {
-        BaseServer *s = NULL;
-        int port = arg ? atoi (arg) : 0;
-        if (port == 0)
-          port = 6720;
-        if (port > 0)
-          s = new InetServer (arguments->l3(), arguments->tracer(), port);
-        if (!s || !s->init ())
-          die ("initialisation of the knxd inet protocol failed");
-        arguments->has_work++;
-      }
-      break;
-    case 't':
-      if (arg)
-	{
-	  char *x;
-	  unsigned long level = strtoul(arg, &x, 0);
-	  if (*x)
-	    die ("Trace level: '%s' is not a number", arg);
-          arguments->tracer(true)->SetTraceLevel (level);
-	}
-      else
-        arguments->tracer(true)->SetTraceLevel (0);
-      break;
-    case 'f':
-      arguments->tracer(true)->SetErrorLevel (arg ? atoi (arg) : 0);
-      break;
-    case 'e':
-      if (arguments->has_l3 ())
-	{
-	  die ("You need to specify '-e' earlier");
-	}
-      arguments->addr = readaddr (arg);
-      break;
-    case 'p':
-      arguments->pidfile = arg;
-      break;
-    case 'd':
-      arguments->daemon = (char *) (arg ? arg : "/dev/null");
-      break;
-    case 'c':
-      if (!CreateGroupCache (arguments->l3(), arguments->tracer(), true))
-        die ("initialisation of the group cache failed");
-      break;
-    case 'n':
-      arguments->eibnetname = (char *)arg;
-      if(arguments->eibnetname[0] == '=')
-	arguments->eibnetname++;
-      if(strlen(arguments->eibnetname) >= 30)
-	die("EIBnetServer/IP name must be shorter than 30 bytes");
-      break;
-    case OPT_FORCE_BROADCAST:
-      arguments->force_broadcast = true;
+    case ARGP_KEY_INIT:
       break;
     case OPT_STOP_NOW:
-      arguments->stop_now = true;
+      stop_now = true;
       break;
-    case OPT_BACK_TUNNEL_NOQUEUE:
-      arguments->l2opts.flags |= FLAG_B_TUNNEL_NOQUEUE;
+
+    case 'l':
+      do_list = true;
       break;
-    case OPT_BACK_TPUARTS_ACKGROUP:
-      arguments->l2opts.flags |= FLAG_B_TPUARTS_ACKGROUP;
-      break;
-    case OPT_BACK_TPUARTS_ACKINDIVIDUAL:
-      arguments->l2opts.flags |= FLAG_B_TPUARTS_ACKINDIVIDUAL;
-      break;
-    case OPT_BACK_TPUARTS_DISCH_RESET:
-      arguments->l2opts.flags |= FLAG_B_TPUARTS_DISCH_RESET;
-      break;
-    case OPT_BACK_EMI_NOQUEUE:
-      arguments->l2opts.flags |= FLAG_B_EMI_NOQUEUE;
-      break;
-    case 'N':
-      arguments->l2opts.flags |= FLAG_B_NO_MONITOR;
-      break;
+
     case ARGP_KEY_ARG:
-    case 'b':
-      {
-	arguments->l2opts.t = arguments->tracer ();
-        Layer2 *l2 = Create (arg, &arguments->l2opts, arguments->l3 ());
-        if (!l2 || !l2->init ())
-          die ("initialisation of backend '%s' failed", arg);
-	if (arguments->l2opts.flags)
-          die ("You provided options which '%s' does not recognize", arg);
-        memset(&arguments->l2opts, 0, sizeof(arguments->l2opts));
-        arguments->has_work++;
-        break;
-      }
-    case ARGP_KEY_FINI:
-      if (arguments->l2opts.flags)
-        die ("You need to use backend flags in front of the affected backend");
-
-#ifdef HAVE_SYSTEMD
-      {
-        BaseServer *s = NULL;
-        const int num_fds = sd_listen_fds(0);
-
-        if( num_fds < 0 )
-          die("Error getting fds from systemd.");
-        // zero FDs from systemd is not a bug
-
-        for( int fd = SD_LISTEN_FDS_START; fd < SD_LISTEN_FDS_START+num_fds; ++fd )
-          {
-            if( sd_is_socket(fd, AF_UNSPEC, SOCK_STREAM, 1) <= 0 )
-              die("Error: socket not of expected type.");
-
-            s = new SystemdServer(arguments->l3(), arguments->tracer(), fd);
-            if (!s->init ())
-              die ("initialisation of the systemd socket failed");
-            arguments->has_work++;
-          }
-      }
-#endif
-
-	  errno = 0;
-      if (arguments->tunnel || arguments->route || arguments->discover || 
-          arguments->eibnetname)
-        die ("Option '-S' starts the multicast server.\n"
-             "-T/-R/-D/-n after or without that option are useless.");
-      if (arguments->l2opts.flags)
-	die ("You provided L2 flags after specifying an L2 interface.");
-      if (arguments->has_work == 0)
-        die ("I know about no interface. Nothing to do. Giving up.");
-      if (arguments->has_work == 1)
-        die ("I only have one interface. Nothing to do. Giving up.");
-      arguments->finish_l3();
+      if (cfgfile == NULL)
+        cfgfile = arg;
+      else if (mainsection == NULL)
+        mainsection = arg;
+      else
+        usage();
       break;
 
+    case ARGP_KEY_SUCCESS:
+      return 0;
+
+    case ARGP_KEY_NO_ARGS:
+      if (!do_list)
+        usage();
+      return 0;
+
+    case ARGP_KEY_ARGS:
+    case ARGP_KEY_FINI:
+    case ARGP_KEY_END:
+      if (cfgfile != NULL)
+        break;
+    case ARGP_KEY_ERROR:
     default:
-      return ARGP_ERR_UNKNOWN;
+      if (!do_list)
+        fork_args_helper();
+      return 1;
     }
   return 0;
 }
 
+const char args_doc[] = "config-file [main-section]";
+
 /** information for the argument parser*/
 static struct argp argp = { options, parse_opt, args_doc, doc };
 
-#define FILE_MODE (S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH)
+// #define EV_TRACE
+
+static void
+signal_cb (EV_P_ ev_signal *w UNUSED, int revents UNUSED)
+{
+  ev_break (EV_A_ EVBREAK_ALL);
+  stopping = true;
+}
+
+#ifdef EV_TRACE
+static void
+timeout_cb (EV_P_ ev_timer *w, int revents)
+{
+  printf("LIBEV ping\n");
+}
+#endif
+
+struct _hup {
+  struct ev_signal sighup;
+  const char *logfile;
+  TracePtr t;
+} hup;
+
+static void
+sighup_cb (EV_P_ ev_signal *w, int revents UNUSED)
+{
+  struct _hup *hup = (struct _hup *)w;
+
+  if(hup->logfile && hup->logfile[0])
+    {
+      int fd = open (hup->logfile, O_WRONLY | O_APPEND | O_CREAT, 0660);
+      if (fd == -1)
+      {
+        ERRORPRINTF (hup->t, E_ERROR | 21, "can't open log file %s", hup->logfile);
+        return;
+      }
+      close (1);
+      close (2);
+      dup2 (fd, 1);
+      dup2 (fd, 2);
+      close (fd);
+    }
+}
 
 int
 main (int ac, char *ag[])
 {
   int index;
-  pth_init ();
+  setlinebuf(stdout);
 
-  argp_parse (&argp, ac, ag, ARGP_IN_ORDER, &index, &arg);
+  argv = ag;
 
-  // if you ever want this to be fatal, doing it here would be too late
-  if (getuid () == 0)
-    ERRORPRINTF (arg.tracer(), E_WARNING | 20, 0, "EIBD should not run as root");
+// set up libev
+  loop = ev_default_loop(EVFLAG_AUTO | EVFLAG_NOSIGMASK | EVBACKEND_SELECT);
+  assert (loop);
 
-  signal (SIGPIPE, SIG_IGN);
+#ifdef EV_TRACE
+  struct ev_timer timer;
+#endif
+  struct _hup hup;
+  struct ev_signal sigint;
+  struct ev_signal sigterm;
 
-  if (arg.daemon)
+#ifdef EV_TRACE
+  printf("LIBEV starting up\n");
+#endif
+
+#ifdef HAVE_SYSTEMD
+  num_fds = sd_listen_fds(0);
+  if( num_fds < 0 )
+    die("Error getting fds from systemd.");
+#endif
+#ifdef EV_TRACE
+  ev_timer_init (&timer, timeout_cb, 1., 10.);
+  ev_timer_again (EV_A_ &timer);
+#endif
+
+  std::string arg_str = "";
+  for (index=0; index<ac; index++)
     {
-      int fd = open (arg.daemon, O_WRONLY | O_APPEND | O_CREAT, FILE_MODE);
+      arg_str += ' ';
+      arg_str += ag[index];
+    }
+
+  argp_parse (&argp, ac, ag, ARGP_NO_EXIT | ARGP_NO_ERRS | ARGP_IN_ORDER, &index, NULL);
+
+  if (do_list)
+    {
+      static Factory<Server> _servers;
+      static Factory<Driver> _drivers;
+      static Factory<Filter> _filters;
+
+      if (cfgfile == NULL)
+        {
+        x1:
+          printf(""
+            "Requires type of structure to list.\n"
+            "Either 'driver', 'filter' or 'server'.\n"
+            );
+        }
+      else // if (mainsection == NULL)
+        {
+          if (!strcmp(cfgfile, "driver"))
+            {
+              for(auto &m : _drivers.Instance().map())
+                printf("%s\n",m.first.c_str());
+            }
+          else if (!strcmp(cfgfile, "filter"))
+            {
+              for(auto &m : _filters.Instance().map())
+                printf("%s\n",m.first.c_str());
+            }
+          else if (!strcmp(cfgfile, "server"))
+            {
+              for(auto &m : _servers.Instance().map())
+                printf("%s\n",m.first.c_str());
+            }
+          else
+            goto x1;
+        }
+      // else
+      //   {
+      //     printf("Detail printing is not implemented yet.\n");
+      //   }
+      return 0;
+    }
+  if (cfgfile == NULL)
+    usage();
+  if (mainsection == NULL)
+    mainsection = "main";
+
+  IniData i;
+  int errl = i.parse(cfgfile);
+  if (errl)
+    die("Parse error of '%s' in line %d", cfgfile, errl);
+  IniSectionPtr main = i[mainsection];
+
+  pidfile = main->value("pidfile","").c_str();
+  if (num_fds)
+    pidfile = "";
+
+  logfile = main->value("logfile","").c_str();
+  if (num_fds)
+    logfile = NULL;
+
+  background = main->value("background",false);
+  if (num_fds)
+    background = false;
+
+  if (!stop_now)
+    stop_now = main->value("stop-after-setup",false);
+
+  if (logfile && *logfile)
+    {
+      int fd = open (logfile, O_WRONLY | O_APPEND | O_CREAT, 0660);
       if (fd == -1)
-	die ("Can not open file %s", arg.daemon);
+        die ("Can not open file %s", logfile);
       int i = fork ();
       if (i < 0)
-	die ("fork failed");
+        die ("fork failed");
       if (i > 0)
-	exit (0);
+        exit (0);
       close (1);
       close (2);
       close (0);
@@ -541,71 +365,72 @@ main (int ac, char *ag[])
       setsid ();
     }
 
+  Router *r = new Router(i,mainsection);
+
+  ERRORPRINTF (r->t, E_INFO | 0, "%s:%s", REAL_VERSION, arg_str);
+
+  if (!r->setup())
+    {
+      ERRORPRINTF(r->t, E_FATAL,"Error setting up the KNX router.");
+      exit(2);
+    }
+  if (!strcmp(cfgfile, "-"))
+    ERRORPRINTF(r->t, E_WARNING,"Consider using a config file.");
+
+  if (background) {
+    hup.t = TracePtr(new Trace(*r->t));
+    hup.t->setAuxName("reload");
+    hup.logfile = logfile;
+    ev_signal_init (&hup.sighup, sighup_cb, SIGHUP);
+    ev_signal_start (EV_A_ &hup.sighup);
+  }
+
+  signal (SIGPIPE, SIG_IGN);
+
+  if (getuid () == 0)
+    ERRORPRINTF (r->t, E_WARNING | 20, "knxd should not run as root");
+
+  if (!stop_now)
+    {
+      r->start();
+
+      ev_signal_init (&sigint, signal_cb, SIGINT);
+      ev_signal_start (EV_A_ &sigint);
+      ev_signal_init (&sigterm, signal_cb, SIGTERM);
+      ev_signal_start (EV_A_ &sigterm);
+    }
+
   FILE *pidf;
-  if (arg.pidfile)
-    if ((pidf = fopen (arg.pidfile, "w")) != NULL)
+  if (pidfile && *pidfile)
+    if ((pidf = fopen (pidfile, "w")) != NULL)
       {
-	fprintf (pidf, "%d", getpid ());
-	fclose (pidf);
+        fprintf (pidf, "%d", getpid ());
+        fclose (pidf);
       }
-
-
-  signal (SIGINT, SIG_IGN);
-  signal (SIGTERM, SIG_IGN);
 
   // main loop
 #ifdef HAVE_SYSTEMD
   sd_notify(0,"READY=1");
 #endif
-  int sig;
-  if (! arg.stop_now)
-    do {
-      sigset_t t1;
-      sigemptyset (&t1);
-      sigaddset (&t1, SIGINT);
-      sigaddset (&t1, SIGHUP);
-      sigaddset (&t1, SIGTERM);
 
-      pth_sigwait (&t1, &sig);
+  // now wait for events
+  ev_run (EV_A_ stop_now ? EVRUN_NOWAIT : 0);
 
-      if (sig == SIGHUP && arg.daemon)
-	{
-	  int fd =
-	    open (arg.daemon, O_WRONLY | O_APPEND | O_CREAT, FILE_MODE);
-	  if (fd == -1)
-	    {
-	      ERRORPRINTF (arg.tracer(), E_ERROR | 21, 0, "can't open log file %s",
-			   arg.daemon);
-	      continue;
-	    }
-	  close (1);
-	  close (2);
-	  dup2 (fd, 1);
-	  dup2 (fd, 2);
-	  close (fd);
-	}
-
-    } while (sig == SIGHUP);
 #ifdef HAVE_SYSTEMD
   sd_notify(0,"STOPPING=1");
 #endif
+  ERRORPRINTF(r->t, E_NOTICE,"Shutting down.");
 
-  signal (SIGINT, SIG_DFL);
-  signal (SIGTERM, SIG_DFL);
+  stopping = false; // re-set by a second signal
+  r->stop();
+  while (!r->isIdle() && !stopping)
+    ev_run (EV_A_ stop_now ? EVRUN_NOWAIT : EVRUN_ONCE);
 
-#ifdef HAVE_GROUPCACHE
-  DeleteGroupCache ();
-#endif
+  int exitcode = r->exitcode;
+  delete r;
 
-  arg.free_l3();
+  if (pidfile && *pidfile)
+    unlink (pidfile);
 
-  if (arg.pidfile)
-    unlink (arg.pidfile);
-
-  pth_yield (0);
-  pth_yield (0);
-  pth_yield (0);
-  pth_yield (0);
-  pth_exit (0);
-  return 0;
+  return exitcode;
 }

@@ -17,51 +17,8 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 */
 
-#include <unistd.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <sys/ioctl.h>
 #include "dummy.h"
-#include "layer3.h"
 
-DummyL2Driver::DummyL2Driver (Layer3 *l3, L2options *opt) : Layer2 (l3, opt)
-{
-  TRACEPRINTF (t, 2, this, "Open");
+DummyL2Driver::~DummyL2Driver() { }
+DummyL2Filter::~DummyL2Filter() { }
 
-  layer2_is_bus();
-  Start ();
-
-  TRACEPRINTF (t, 2, this, "Openend");
-}
-
-DummyL2Driver::~DummyL2Driver ()
-{
-  TRACEPRINTF (t, 2, this, "Close");
-  Stop ();
-}
-
-void
-DummyL2Driver::Send_L_Data (LPDU * l)
-{
-  TRACEPRINTF (t, 2, this, "Send %s", l->Decode ()());
-  if ((mode & BUSMODE_MONITOR) && l->getType () == L_Data)
-    {
-      L_Busmonitor_PDU *l2 = new L_Busmonitor_PDU (this);
-      l2->pdu.set (l->ToPacket ());
-      l3->recv_L_Data (l2);
-    }
-  delete l;
-}
-
-//Open
-
-void
-DummyL2Driver::Run (pth_sem_t * stop1)
-{
-  TRACEPRINTF (t, 2, this, "DummyStart");
-  pth_event_t stop = pth_event (PTH_EVENT_SEM, stop1);
-  pth_wait(stop);
-  pth_event_free (stop, PTH_FREE_THIS);
-  TRACEPRINTF (t, 2, this, "DummyEnd");
-}

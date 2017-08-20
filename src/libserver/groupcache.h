@@ -22,48 +22,95 @@
 
 #include <time.h>
 
-#include "layer3.h"
-#include "layer2.h"
+#include <map>
+#include <unordered_map>
 
-typedef struct
+#include "link.h"
+#include "client.h"
+
+class GroupCache;
+
+struct GroupCacheEntry
 {
+  GroupCacheEntry(eibaddr_t dst) { this->dst = dst; }
   /** Layer 4 data */
   CArray data;
   /** source address */
-  eibaddr_t src;
+  eibaddr_t src = 0;
   /** destination address */
   eibaddr_t dst;
   /** receive time */
   time_t recvtime;
-} GroupCacheEntry;
+  /** seqnum */
+  uint32_t seq;
+};
 
-class GroupCache:public Layer2mixin
+typedef void (*GCReadCallback)(const GroupCacheEntry &foo, bool nowait, ClientConnPtr c);
+typedef void (*GCLastCallback)(const Array<eibaddr_t> &foo, uint32_t end, ClientConnPtr c);
+
+class GroupCacheReader
 {
-  /** output queue */
-  Array < GroupCacheEntry * > cache;
-  /** controlled by .Start/Stop; if false, the whole code does nothing */
-  bool enable;
-  /** signal for .Read and .LastUpdates that the cache has been updated */
-  pth_cond_t cond;
-  /** serialize access to .cond */
-  pth_mutex_t mutex;
-  /** current position in 'updates' array */
-  uint16_t pos;
-  /** circular buffer of last-updated group addresses */
-  eibaddr_t updates[0x100];
+public:
+  GroupCacheReader(GroupCache *); 
+  virtual ~GroupCacheReader();
 
-  /** find this group */
-  GroupCacheEntry *find (eibaddr_t dst);
-  /** add this entry */
-  void add (GroupCacheEntry * entry);
+  bool stopped = false;
+  GroupCache *gc;
+  virtual void updated(GroupCacheEntry &) = 0;
+  virtual void stop();
+};
+
+/** map last-updated sequence numbers to group addresses */
+typedef std::map<uint32_t, eibaddr_t> SeqMap;
+
+/** map group addresses to cache entries */
+typedef std::unordered_map<eibaddr_t, GroupCacheEntry> CacheMap;
+
+class GroupCache:public Driver
+{
+  Array < GroupCacheReader * > reader;
+  /** The Cache */
+  CacheMap cache;
+  /** controlled by .Start/Stop; if false, the whole code does nothing */
+  bool enable = false;
+  /** max size of cache */
+  uint16_t maxsize;
+  /** cached copy of main address */
+  eibaddr_t addr;
+
+public: // but only for GroupCacheReader
+  bool setup();
+  void start();
+  void stop();
+  bool checkGroupAddress (eibaddr_t addr UNUSED) { return true; }
+  bool checkAddress (eibaddr_t addr UNUSED) { return false; }
+  bool hasAddress (eibaddr_t addr ) { return addr == this->addr; }
+  void addAddress (eibaddr_t addr UNUSED) { }
+
+private:
+  ev::async remtrigger; void remtrigger_cb(ev::async &w, int revents);
+  /** signal that this entry has been updated */
+  virtual void updated(GroupCacheEntry &);
 
 public:
   /** constructor */
-  GroupCache (Layer3 * l3, Trace * t);
+  GroupCache (const LinkConnectPtr& c, IniSectionPtr& s);
   /** destructor */
   virtual ~GroupCache ();
   /** Feed data to the cache */
-  void Send_L_Data (L_Data_PDU * l);
+  void send_L_Data (LDataPtr l);
+
+  /** add a reader which gets triggered on updates */
+  void add (GroupCacheReader *r);
+  void remove (GroupCacheReader *r);
+
+  /** remove an address from the cache */
+  void remove (eibaddr_t ga);
+
+  /** seqnum of last entry */
+  uint32_t seq = 0;
+  /** map seqnum to group address */
+  SeqMap cache_seq;
 
   /** Turn on caching, calls l3.registerGroupCallBack(ANY) */
   bool Start ();
@@ -73,12 +120,15 @@ public:
   void Stop ();
 
   /** read, and optionally wait for, a cache entry for this address */
-  GroupCacheEntry Read (eibaddr_t addr, unsigned timeout, uint16_t age);
+  void Read (eibaddr_t addr, unsigned timeout, uint16_t age,
+             GCReadCallback cb, ClientConnPtr c);
   /** incrementally monitor group cache updates */
-  Array < eibaddr_t > LastUpdates (uint16_t start, uint8_t timeout,
-                                   uint16_t & end, pth_event_t stop);
-  // remove this group
-  void remove (eibaddr_t addr);
+  void LastUpdates (uint16_t start, uint8_t timeout,
+                    GCLastCallback cb, ClientConnPtr c);
+  void LastUpdates2 (uint32_t start, uint8_t timeout,
+                     GCLastCallback cb, ClientConnPtr c);
 };
+
+typedef std::shared_ptr<GroupCache> GroupCachePtr;
 
 #endif

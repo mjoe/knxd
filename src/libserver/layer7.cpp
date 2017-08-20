@@ -20,28 +20,26 @@
 #include "apdu.h"
 #include "layer7.h"
 
-Layer7_Broadcast::Layer7_Broadcast (Layer3 * l3, Trace * tr)
+Layer7_Broadcast::Layer7_Broadcast (TracePtr tr)
 {
-  t = tr;
-  TRACEPRINTF (t, 5, this, "L7Broadcast Open");
-  l4 = new T_Broadcast (l3, tr, 0);
-  if (!l4->init ())
-    {
-      TRACEPRINTF (t, 5, this, "L7Broadcast init bad");
-      delete l4;
-      l4 = 0;
-    }
+  t = TracePtr(new Trace(*tr));
+  t->setAuxName("L7");
+  TRACEPRINTF (t, 5, "L7Broadcast Open");
 }
 
 Layer7_Broadcast::~Layer7_Broadcast ()
 {
-  TRACEPRINTF (t, 5, this, "L7Broadcast Close");
-  if (l4)
-    delete l4;
+  TRACEPRINTF (t, 5, "L7Broadcast Close");
 }
 
-bool Layer7_Broadcast::init ()
+bool Layer7_Broadcast::setup();
 {
+  l4 = T_BroadcastPtr(new T_Broadcast (t, 0));
+  if (!l4->setup (this))
+    {
+      TRACEPRINTF (t, 5, "L7Broadcast init bad");
+      l4 = 0;
+    }
   return l4 != 0;
 }
 
@@ -50,16 +48,16 @@ Layer7_Broadcast::A_IndividualAddress_Write (eibaddr_t addr)
 {
   A_IndividualAddress_Write_PDU a;
   a.addr = addr;
-  l4->Send (a.ToPacket ());
+  l4->recv (a.ToPacket ());
 }
 
 Array < eibaddr_t >
-  Layer7_Broadcast::A_IndividualAddress_Read (Trace * tr, unsigned timeout)
+  Layer7_Broadcast::A_IndividualAddress_Read (TracePtr tr, unsigned timeout)
 {
   Array < eibaddr_t > addrs;
   A_IndividualAddress_Read_PDU r;
-  APDU *a;
-  l4->Send (r.ToPacket ());
+  APDUPtr a;
+  l4->recv (r.ToPacket ());
   pth_event_t t = pth_event (PTH_EVENT_RTIME, pth_time (timeout, 0));
   while (pth_event_status (t) != PTH_STATUS_OCCURRED)
     {
@@ -68,7 +66,7 @@ Array < eibaddr_t >
 	{
 	  a = APDU::fromPacket (c->data, tr);
 	  if (a->isResponse (&r))
-	    addrs.add (c->src);
+	    addrs.push_back (c->src);
 	  delete a;
 	  delete c;
 	}
@@ -77,28 +75,25 @@ Array < eibaddr_t >
   return addrs;
 }
 
-Layer7_Connection::Layer7_Connection (Layer3 * l3, Trace * tr, eibaddr_t d)
+Layer7_Connection::Layer7_Connection (TracePtr tr, eibaddr_t d)
 {
-  TRACEPRINTF (t, 5, this, "L7Connection open");
   t = tr;
+  TRACEPRINTF (t, 5, "L7Connection open");
   dest = d;
-  l4 = new T_Connection (l3, tr, d);
-  if (!l4->init ())
-    {
-      TRACEPRINTF (t, 5, this, "L7Connection init bad");
-      delete l4;
-      l4 = 0;
-    }
 }
 
 Layer7_Connection::~Layer7_Connection ()
 {
-  if (l4)
-    delete l4;
 }
 
-bool Layer7_Connection::init ()
+bool Layer7_Connection::setup()
 {
+  l4 = T_ConnectionPtr(new T_Connection (t, dest));
+  if (!l4->setup (this))
+    {
+      TRACEPRINTF (t, 5, "L7Connection init bad");
+      l4 = 0;
+    }
   return l4 != 0;
 }
 
@@ -106,22 +101,22 @@ void
 Layer7_Connection::A_Restart ()
 {
   A_Restart_PDU a;
-  l4->Send (a.ToPacket ());
+  l4->recv (a.ToPacket ());
 }
 
-APDU *
+APDUPtr
 Layer7_Connection::Request_Response (APDU * r)
 {
-  APDU *a;
+  APDUPtr a;
   CArray *c;
-  l4->Send (r->ToPacket ());
+  l4->recv (r->ToPacket ());
   pth_event_t t = pth_event (PTH_EVENT_RTIME, pth_time (6, 100));
   while (pth_event_status (t) != PTH_STATUS_OCCURRED)
     {
       c = l4->Get (t);
       if (!c)
         continue;
-      if (c->len () == 0)
+      if (c->size() == 0)
         {
           delete c;
           continue;
@@ -133,7 +128,6 @@ Layer7_Connection::Request_Response (APDU * r)
           pth_event_free (t, PTH_FREE_THIS);
           return a;
         }
-      delete a;
     }
   pth_event_free (t, PTH_FREE_THIS);
   return 0;
@@ -141,19 +135,18 @@ Layer7_Connection::Request_Response (APDU * r)
 
 int
 Layer7_Connection::A_Property_Read (uchar obj, uchar propertyid,
-				    uint16_t start, uchar count, CArray & erg)
+				    uint16_t start, uchar count, CArray & result)
 {
   A_PropertyValue_Read_PDU r;
   r.obj = obj;
   r.prop = propertyid;
   r.start = start & 0x0fff;
   r.count = count & 0x0f;
-  APDU *a = Request_Response (&r);
+  APDUPtr a = Request_Response (&r);
   if (!a)
     return -1;
-  A_PropertyValue_Response_PDU *a1 = (A_PropertyValue_Response_PDU *) a;
-  erg = a1->data;
-  delete a;
+  A_PropertyValue_Response_PDU *a1 = (A_PropertyValue_Response_PDU *)&*a;
+  result = a1->data;
   return 0;
 }
 
@@ -168,12 +161,11 @@ Layer7_Connection::A_Property_Write (uchar obj, uchar propertyid,
   r.start = start & 0x0fff;
   r.count = count & 0x0f;
   r.data = data;
-  APDU *a = Request_Response (&r);
+  APDUPtr a = Request_Response (&r);
   if (!a)
     return -1;
   A_PropertyValue_Response_PDU *a1 = (A_PropertyValue_Response_PDU *) a;
   result = a1->data;
-  delete a;
   return 0;
 }
 
@@ -187,7 +179,7 @@ Layer7_Connection::A_Property_Desc (uchar obj, uchar & property,
   r.obj = obj;
   r.prop = property;
   r.property_index = property_index;
-  APDU *a = Request_Response (&r);
+  APDUPtr a = Request_Response (&r);
   if (!a)
     return -1;
   A_PropertyDescription_Response_PDU *a1 =
@@ -205,7 +197,7 @@ Layer7_Connection::A_Device_Descriptor_Read (uint16_t & maskver, uchar type)
 {
   A_DeviceDescriptor_Read_PDU r;
   r.type = type & 0x3f;
-  APDU *a = Request_Response (&r);
+  APDUPtr a = Request_Response (&r);
   if (!a)
     return -1;
   A_DeviceDescriptor_Response_PDU *a1 = (A_DeviceDescriptor_Response_PDU *) a;
@@ -221,7 +213,7 @@ Layer7_Connection::A_ADC_Read (uchar channel, uchar readcount,
   A_ADC_Read_PDU r;
   r.channel = channel & 0x3f;
   r.count = readcount;
-  APDU *a = Request_Response (&r);
+  APDUPtr a = Request_Response (&r);
   if (!a)
     return -1;
   A_ADC_Response_PDU *a1 = (A_ADC_Response_PDU *) a;
@@ -236,7 +228,7 @@ Layer7_Connection::A_Memory_Read (memaddr_t addr, uchar len, CArray & data)
   A_Memory_Read_PDU r;
   r.addr = addr;
   r.count = len & 0x0f;
-  APDU *a = Request_Response (&r);
+  APDUPtr a = Request_Response (&r);
   if (!a)
     return -1;
   A_Memory_Response_PDU *a1 = (A_Memory_Response_PDU *) a;
@@ -250,9 +242,9 @@ Layer7_Connection::A_Memory_Write (memaddr_t addr, const CArray & data)
 {
   A_Memory_Write_PDU r;
   r.addr = addr;
-  r.count = data () & 0x0f;
-  r.data.set (data.array (), data () & 0x0f);
-  l4->Send (r.ToPacket ());
+  r.count = data.size() & 0x0f;
+  r.data.set (data.data(), data.size() & 0x0f);
+  l4->recv (r.ToPacket ());
   return 0;
 }
 
@@ -261,7 +253,7 @@ Layer7_Connection::A_Authorize (eibkey_type key, uchar & level)
 {
   A_Authorize_Request_PDU r;
   r.key = key;
-  APDU *a = Request_Response (&r);
+  APDUPtr a = Request_Response (&r);
   if (!a)
     return -1;
   A_Authorize_Response_PDU *a1 = (A_Authorize_Response_PDU *) a;
@@ -276,7 +268,7 @@ Layer7_Connection::A_KeyWrite (eibkey_type key, uchar & level)
   A_Key_Write_PDU r;
   r.key = key;
   r.level = level;
-  APDU *a = Request_Response (&r);
+  APDUPtr a = Request_Response (&r);
   if (!a)
     return -1;
   A_Key_Response_PDU *a1 = (A_Key_Response_PDU *) a;
@@ -306,7 +298,7 @@ Layer7_Connection::X_Memory_Write (memaddr_t addr, const CArray & data)
   CArray d1;
   if (A_Memory_Write (addr, data) == -1)
     return -1;
-  if (A_Memory_Read (addr, data (), d1) == -1)
+  if (A_Memory_Read (addr, data.size(), d1) == -1)
     return -1;
   if (d1 != data)
     return -2;
@@ -320,16 +312,16 @@ Layer7_Connection::X_Memory_Write_Block (memaddr_t addr, const CArray & data)
   unsigned int i, j;
   int k, res = 0;
   const unsigned blocksize = 12;
-  if (X_Memory_Read_Block (addr, data (), prev) == -1)
+  if (X_Memory_Read_Block (addr, data.size(), prev) == -1)
     return -1;
-  for (i = 0; i < data (); i++)
+  for (i = 0; i < data.size(); i++)
     {
       if (data[i] == prev[i])
 	continue;
       j = 0;
-      while (data[i + j] != prev[i + j] && j < blocksize && i + j < data ())
+      while (data[i + j] != prev[i + j] && j < blocksize && i + j < data.size())
 	j++;
-      k = X_Memory_Write (addr + i, CArray (data.array () + i, j));
+      k = X_Memory_Write (addr + i, CArray (data, i, j));
       if (k == -1)
 	return -1;
       if (k == -2)
@@ -372,12 +364,12 @@ Layer7_Connection::A_Memory_Write_Block (memaddr_t addr, const CArray & data)
   int k, res = 0;
   const unsigned blocksize = 12;
 
-  for (i = 0; i < data (); i += blocksize)
+  for (i = 0; i < data.size(); i += blocksize)
     {
       j = blocksize;
-      if (i + j > data ())
-	j = data () - i;
-      k = A_Memory_Write (addr + i, CArray (data.array () + i, j));
+      if (i + j > data.size())
+	j = data.size() - i;
+      k = A_Memory_Write (addr + i, CArray (data.data() + i, j));
       if (k == -1)
 	return -1;
     }
@@ -385,44 +377,41 @@ Layer7_Connection::A_Memory_Write_Block (memaddr_t addr, const CArray & data)
   return res;
 }
 
-Layer7_Individual::Layer7_Individual (Layer3 * l3, Trace * tr, eibaddr_t d)
+Layer7_Individual::Layer7_Individual (TracePtr tr, eibaddr_t d)
 {
-  TRACEPRINTF (t, 5, this, "L7Individual open");
   t = tr;
+  TRACEPRINTF (t, 5, "L7Individual open");
   dest = d;
-  l4 = new T_Individual (l3, tr, d, false);
-  if (!l4->init ())
-    {
-      TRACEPRINTF (t, 5, this, "L7Individual init bad");
-      delete l4;
-      l4 = 0;
-    }
 }
 
 Layer7_Individual::~Layer7_Individual ()
 {
-  if (l4)
-    delete l4;
 }
 
-bool Layer7_Individual::init ()
+bool Layer7_Individual::setup()
 {
+  l4 = T_IndividualPtr(new T_Individual (t, dest, false));
+  if (!l4->setup ())
+    {
+      TRACEPRINTF (t, 5, "L7Individual init bad");
+      l4 = 0;
+    }
   return l4 != 0;
 }
 
-APDU *
+APDUPtr
 Layer7_Individual::Request_Response (APDU * r)
 {
-  APDU *a;
+  APDUPtr a;
   CArray *c;
-  l4->Send (r->ToPacket ());
+  l4->recv (r->ToPacket ());
   pth_event_t t = pth_event (PTH_EVENT_RTIME, pth_time (6, 100));
   while (pth_event_status (t) != PTH_STATUS_OCCURRED)
     {
       c = l4->Get (t);
       if (c)
 	{
-	  if (c->len () == 0)
+	  if (c->size() == 0)
 	    {
 	      delete c;
 	      pth_event_free (t, PTH_FREE_THIS);
@@ -435,7 +424,6 @@ Layer7_Individual::Request_Response (APDU * r)
 	      pth_event_free (t, PTH_FREE_THIS);
 	      return a;
 	    }
-	  delete a;
 	  pth_event_free (t, PTH_FREE_THIS);
 	  return 0;
 	}
@@ -453,7 +441,7 @@ Layer7_Individual::A_Property_Read (uchar obj, uchar propertyid,
   r.prop = propertyid;
   r.start = start & 0x0fff;
   r.count = count & 0x0f;
-  APDU *a = Request_Response (&r);
+  APDUPtr a = Request_Response (&r);
   if (!a)
     return -1;
   A_PropertyValue_Response_PDU *a1 = (A_PropertyValue_Response_PDU *) a;
@@ -473,7 +461,7 @@ Layer7_Individual::A_Property_Write (uchar obj, uchar propertyid,
   r.start = start & 0x0fff;
   r.count = count & 0x0f;
   r.data = data;
-  APDU *a = Request_Response (&r);
+  APDUPtr a = Request_Response (&r);
   if (!a)
     return -1;
   A_PropertyValue_Response_PDU *a1 = (A_PropertyValue_Response_PDU *) a;

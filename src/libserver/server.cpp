@@ -18,90 +18,126 @@
 */
 
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <ev++.h>
 #include "server.h"
 #include "client.h"
 
-
-BaseServer::BaseServer (Layer3 * layer3, Trace * tr)
-	: Layer2virtual (layer3, tr)
+void
+NetServer::stop_()
 {
+  TRACEPRINTF (t, 8, "StopServer");
+
+  io.stop();
+  cleanup.stop();
+  while(!cleanup_q.empty())
+    cleanup_q.pop();
+
+  ITER(i,connections)
+    (*i)->stop();
+  connections.clear();
+
+  if (fd > -1)
+    {
+      close (fd);
+      fd = -1;
+    }
 }
 
-BaseServer::~BaseServer ()
+void
+NetServer::stop()
 {
-  TRACEPRINTF (t, 8, this, "StopBaseServer");
-  Stop ();
-  if (l3)
-    l3->deregisterServer (this);
+  stop_();
+  stopped();
 }
 
-bool
-BaseServer::init ()
+NetServer::~NetServer ()
 {
-  l3->registerServer (this);
-  return true;
+  // stopped() may not be called from a destructor
+  stop_();
 }
 
-Server::~Server ()
+void
+NetServer::deregister (ClientConnPtr con)
 {
-  TRACEPRINTF (t, 8, this, "StopServer");
-  Stop ();
-  for (unsigned int i = 0; i < connections (); i++)
-    connections[i]->StopDelete ();
-  while (connections () != 0)
-    pth_yield (0);
-
-  if (fd != -1)
-    close (fd);
+  cleanup_q.push(con);
+  cleanup.send();
 }
 
-bool
-Server::deregister (ClientConnection * con)
+void
+NetServer::cleanup_cb (ev::async &w UNUSED, int revents UNUSED)
 {
-  for (unsigned i = 0; i < connections (); i++)
-    if (connections[i] == con)
-      {
-	connections.deletepart (i, 1);
-	return 1;
-      }
-  return 0;
+  while (!cleanup_q.isempty())
+    {
+      ClientConnPtr con = cleanup_q.get();
+
+      ITER(i, connections)
+        if (*i == con)
+          {
+	    connections.erase (i);
+	    break;
+          }
+    }
 }
 
-Server::Server (Layer3 * layer3, Trace * tr)
-    : BaseServer (layer3, tr)
+NetServer::NetServer (BaseRouter& r, IniSectionPtr& s) : Server (r,s)
 {
+  t->setAuxName("NetServ");
   fd = -1;
 }
 
-bool
-Server::init ()
+void
+NetServer::start()
 {
   if (fd == -1)
-    return false;
-  return BaseServer::init();
-}
-
-void
-Server::Run (pth_sem_t * stop1)
-{
-  pth_event_t stop = pth_event (PTH_EVENT_SEM, stop1);
-  while (pth_event_status (stop) != PTH_STATUS_OCCURRED)
     {
-      int cfd;
-      cfd = pth_accept_ev (fd, 0, 0, stop);
-      if (cfd != -1)
-	{
-	  TRACEPRINTF (t, 8, this, "New Connection");
-	  setupConnection (cfd);
-	  ClientConnection *c = new ClientConnection (this, l3, t, cfd);
-	  connections.setpart (&c, connections (), 1);
-	  c->Start ();
-	}
+      stopped();
+      return;
     }
-  pth_event_free (stop, PTH_FREE_THIS);
+  set_non_blocking(fd);
+  io.set<NetServer, &NetServer::io_cb>(this);
+  io.start(fd,ev::READ);
+  cleanup.set<NetServer, &NetServer::cleanup_cb>(this);
+  cleanup.start();
+
+  started();
 }
 
 void
-Server::setupConnection (int cfd UNUSED)
+NetServer::io_cb (ev::io &w UNUSED, int revents UNUSED)
 {
+  int cfd;
+  cfd = accept (fd, NULL,NULL);
+  if (cfd != -1)
+    {
+      TRACEPRINTF (t, 8, "New Connection");
+      setupConnection (cfd);
+      ClientConnPtr c = std::shared_ptr<ClientConnection>(new ClientConnection (std::static_pointer_cast<NetServer>(shared_from_this()), cfd));
+      if (!c->setup())
+        return;
+      c->start();
+      if (c->running)
+        connections.push_back(c);
+    }
+  else if (errno != EWOULDBLOCK && errno != EAGAIN && errno != EINTR)
+    ERRORPRINTF (t, E_ERROR | 51, "Accept %s: %s", name(), strerror(errno));
+}
+
+bool
+NetServer::setup()
+{
+  if (!Server::setup())
+    return false;
+  if (!static_cast<Router&>(router).hasClientAddrs())
+    return false;
+  if (!static_cast<Router &>(router).checkStack(cfg))
+    return false;
+  return true;
+}
+
+void
+NetServer::setupConnection (int cfd UNUSED)
+{
+  ignore_when_systemd = cfg->value("systemd-ignore",ignore_when_systemd);
 }

@@ -23,7 +23,6 @@
 #include <sys/time.h>
 #endif
 
-
 timestamp_t
 getTime ()
 {
@@ -81,3 +80,4 @@ add16Hex (String & s, uint16_t c)
   sprintf (buf, "%04X ", c);
   s += buf;
 }
+
