@@ -240,12 +240,19 @@ Router::setup()
     std::string sd_name_tun = s->value("systemd_tcptunsrv","");
     if (sd_name_knxd.size() > 0 || sd_name_tun.size() > 0)
       {
-        // IniSectionPtr sd = ini[sd_name];
-        // set the section's "referenced" bit, for error checking
+        // mark section as referenced; consume debug/filters (#564)
         if (sd_name_knxd.size() > 0)
-          (void) ini[sd_name_knxd];
+          {
+            IniSectionPtr sd = ini[sd_name_knxd];
+            (void) sd->value("debug", "");
+            (void) sd->value("filters", "");
+          }
         if (sd_name_tun.size() > 0)
-          (void) ini[sd_name_tun];
+          {
+            IniSectionPtr sd = ini[sd_name_tun];
+            (void) sd->value("debug", "");
+            (void) sd->value("filters", "");
+          }
 
         char** fd_names_c = nullptr;
         int num_fds = sd_listen_fds_with_names(0, &fd_names_c);
